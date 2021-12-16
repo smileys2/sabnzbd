@@ -55,9 +55,11 @@ def remove_obsolete(jobs, new_jobs):
     limit = now - 259200  # 3days (3x24x3600)
     for old in list(jobs):
         tm = jobs[old]["time"]
-        if old not in new_jobs:
-            if jobs[old].get("status", " ")[0] in ("G", "B"):
-                jobs[old]["status"] = "X"
+        if old not in new_jobs and jobs[old].get("status", " ")[0] in (
+            "G",
+            "B",
+        ):
+            jobs[old]["status"] = "X"
         if jobs[old]["status"] == "X" and tm < limit:
             logging.debug("Purging link %s", old)
             del jobs[old]
@@ -285,10 +287,7 @@ class RSSReader:
 
                 newlinks.append(link)
 
-                if link in jobs:
-                    jobstat = jobs[link].get("status", " ")[0]
-                else:
-                    jobstat = "N"
+                jobstat = jobs[link].get("status", " ")[0] if link in jobs else "N"
                 if jobstat in "NGB" or (jobstat == "X" and readout):
                     # Match this title against all filters
                     logging.debug("Trying title %s", title)
@@ -336,10 +335,7 @@ class RSSReader:
                                 result = True
                                 break
                             else:
-                                if regexes[n]:
-                                    found = re.search(regexes[n], title)
-                                else:
-                                    found = False
+                                found = re.search(regexes[n], title) if regexes[n] else False
                                 if reTypes[n] == "M" and not found:
                                     logging.debug("Filter rejected on rule %d", n)
                                     result = False
@@ -453,40 +449,39 @@ class RSSReader:
 
     def run(self):
         """Run all the URI's and filters"""
-        if not sabnzbd.PAUSED_ALL:
-            active = False
-            if self.next_run < time.time():
-                self.next_run = time.time() + cfg.rss_rate() * 60
-            feeds = config.get_rss()
-            try:
-                for feed in feeds:
-                    if feeds[feed].enable():
-                        logging.info('Starting scheduled RSS read-out for "%s"', feed)
-                        active = True
-                        self.run_feed(feed, download=True, ignoreFirst=True)
-                        # Wait 15 seconds, else sites may get irritated
-                        for _ in range(15):
-                            if self.shutdown:
-                                return
-                            else:
-                                time.sleep(1.0)
-            except (KeyError, RuntimeError):
-                # Feed must have been deleted
-                logging.info("RSS read-out crashed, feed must have been deleted or edited")
-                logging.debug("Traceback: ", exc_info=True)
-                pass
-            if active:
-                self.save()
-                logging.info("Finished scheduled RSS read-outs")
+        if sabnzbd.PAUSED_ALL:
+            return
+        active = False
+        if self.next_run < time.time():
+            self.next_run = time.time() + cfg.rss_rate() * 60
+        feeds = config.get_rss()
+        try:
+            for feed in feeds:
+                if feeds[feed].enable():
+                    logging.info('Starting scheduled RSS read-out for "%s"', feed)
+                    active = True
+                    self.run_feed(feed, download=True, ignoreFirst=True)
+                    # Wait 15 seconds, else sites may get irritated
+                    for _ in range(15):
+                        if self.shutdown:
+                            return
+                        else:
+                            time.sleep(1.0)
+        except (KeyError, RuntimeError):
+            # Feed must have been deleted
+            logging.info("RSS read-out crashed, feed must have been deleted or edited")
+            logging.debug("Traceback: ", exc_info=True)
+        if active:
+            self.save()
+            logging.info("Finished scheduled RSS read-outs")
 
     @synchronized(RSS_LOCK)
     def show_result(self, feed):
-        if feed in self.jobs:
-            try:
-                return self.jobs[feed]
-            except:
-                return {}
-        else:
+        if feed not in self.jobs:
+            return {}
+        try:
+            return self.jobs[feed]
+        except:
             return {}
 
     @synchronized(RSS_LOCK)
@@ -635,21 +630,14 @@ def _HandleLink(
     jobs[link]["season"] = season
     jobs[link]["episode"] = episode
 
-    if special_rss_site(link):
-        nzbname = None
-    else:
-        nzbname = title
-
+    nzbname = None if special_rss_site(link) else title
     if download:
         jobs[link]["status"] = "D"
         jobs[link]["time_downloaded"] = time.localtime()
         logging.info("Adding %s (%s) to queue", link, title)
         sabnzbd.add_url(link, pp=pp, script=script, cat=cat, priority=priority, nzbname=nzbname)
     else:
-        if star:
-            jobs[link]["status"] = flag + "*"
-        else:
-            jobs[link]["status"] = flag
+        jobs[link]["status"] = flag + "*" if star else flag
 
 
 def _get_link(entry):

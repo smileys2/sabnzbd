@@ -97,13 +97,12 @@ class BaseSorter:
         pass
 
     def get_final_path(self) -> str:
-        if self.matched:
-            # Construct the final path
-            self.get_values()
-            return os.path.join(self.original_path, self.construct_path())
-        else:
+        if not self.matched:
             # Error Sorting
             return os.path.join(self.original_path, self.original_job_name)
+        # Construct the final path
+        self.get_values()
+        return os.path.join(self.original_path, self.construct_path())
 
     def get_names(self):
         """Get the show or movie name from the guess and format it"""
@@ -126,17 +125,15 @@ class BaseSorter:
 
     def get_year(self):
         """Get the year and the corresponding two and four digit decade values"""
-        year = ""
-        if self.nzo:
-            year = self.nzo.nzo_info.get("year")
+        year = self.nzo.nzo_info.get("year") if self.nzo else ""
         if not year:
             year = self.guess.get("year", "")
-            if not year:
-                # Try extracting the year from the guessed date instead
-                try:
-                    year = self.guess.get("date").year or ""
-                except:
-                    pass
+        if not year:
+            # Try extracting the year from the guessed date instead
+            try:
+                year = self.guess.get("date").year or ""
+            except:
+                pass
         self.info["year"] = str(year)
         self.info["decade"] = ""
         self.info["decade_two"] = ""
@@ -215,15 +212,6 @@ class BaseSorter:
             else:
                 mapping.append(("%desc", ""))
 
-            if self.type == "tv":
-                # Season number
-                mapping.append(("%s", self.info["season_num"]))
-                mapping.append(("%0s", self.info["season_num_alt"]))
-
-                # Episode number; note this must come after the %en variants
-                mapping.append(("%e", self.info["episode_num"]))
-                mapping.append(("%0e", self.info["episode_num_alt"]))
-
             if self.type == "date":
                 # Month
                 mapping.append(("%m", self.info["month"]))
@@ -232,6 +220,15 @@ class BaseSorter:
                 # Day
                 mapping.append(("%d", self.info["day"]))
                 mapping.append(("%0d", self.info["day_two"]))
+
+            elif self.type == "tv":
+                # Season number
+                mapping.append(("%s", self.info["season_num"]))
+                mapping.append(("%0s", self.info["season_num_alt"]))
+
+                # Episode number; note this must come after the %en variants
+                mapping.append(("%e", self.info["episode_num"]))
+                mapping.append(("%0e", self.info["episode_num_alt"]))
 
         # Handle generic guessit markers
         for marker, spacer, guess_property in re.findall(RE_GI, sorter):
@@ -269,11 +266,11 @@ class BaseSorter:
         largest = (None, None, 0)
 
         def to_filepath(file, current_path):
-            if is_full_path(file):
-                filepath = os.path.normpath(file)
-            else:
-                filepath = os.path.normpath(os.path.join(current_path, file))
-            return filepath
+            return (
+                os.path.normpath(file)
+                if is_full_path(file)
+                else os.path.normpath(os.path.join(current_path, file))
+            )
 
         # Create a generator of filepaths, ignore samples and excluded files
         filepaths = (
@@ -402,9 +399,8 @@ class SeriesSorter(BaseSorter):
             min_size = cfg.episode_rename_limit.get_int()
         if not self.rename_files:
             return move_to_parent_directory(current_path)
-        else:
-            logging.debug("Renaming series file(s)")
-            return super().rename(files, current_path, min_size)
+        logging.debug("Renaming series file(s)")
+        return super().rename(files, current_path, min_size)
 
 
 class MovieSorter(BaseSorter):
@@ -455,10 +451,12 @@ class MovieSorter(BaseSorter):
 
         def filter_files(f, current_path):
             filepath = os.path.normpath(f) if is_full_path(f) else os.path.normpath(os.path.join(current_path, f))
-            if os.path.exists(filepath):
-                if os.stat(filepath).st_size >= min_size and not is_sample(f) and get_ext(f) not in EXCLUDED_FILE_EXTS:
-                    return True
-            return False
+            return bool(
+                os.path.exists(filepath)
+                and os.stat(filepath).st_size >= min_size
+                and not is_sample(f)
+                and get_ext(f) not in EXCLUDED_FILE_EXTS
+            )
 
         # Filter samples and anything nonexistent or below the size limit
         files = [f for f in files if filter_files(f, current_path)]
@@ -545,9 +543,8 @@ class DateSorter(BaseSorter):
             min_size = cfg.episode_rename_limit.get_int()
         if not self.rename_files:
             return move_to_parent_directory(current_path)
-        else:
-            logging.debug("Renaming date file(s)")
-            return super().rename(files, current_path, min_size)
+        logging.debug("Renaming date file(s)")
+        return super().rename(files, current_path, min_size)
 
 
 def ends_in_file(path: str) -> bool:
@@ -619,17 +616,22 @@ def guess_what(name: str, sort_type: Optional[str] = None) -> MatchesDict:
 
     # Try to avoid setting the type to movie on arbitrary jobs (e.g. 'Setup.exe') just because guessit defaults to that
     table = str.maketrans({char: "" for char in whitespace + "_.-()[]{}"})
-    if guess.get("type") == "movie" and not sort_type == "movie":  # No movie hint
-        if (
-            guess.get("title", "").translate(table) == name.translate(table)  # Check for full name used as title
+    if (
+        guess.get("type") == "movie"
+        and sort_type != "movie"
+        and (
+            guess.get("title", "").translate(table) == name.translate(table)
             or any(
-                c in guess.get("release_group", "") for c in (whitespace + punctuation)
-            )  # interpuction of white spaces in the groupname
-            or not any(
-                [key in guess for key in ("year", "screen_size", "video_codec")]
-            )  # No typical movie properties set
-        ):
-            guess["type"] = "unknown"
+                c in guess.get("release_group", "")
+                for c in (whitespace + punctuation)
+            )
+            or all(
+                key not in guess
+                for key in ("year", "screen_size", "video_codec")
+            )
+        )
+    ):
+        guess["type"] = "unknown"
 
     return guess
 
@@ -661,10 +663,7 @@ def get_titles(
     """Get the title from NZB metadata or jobname, and return it in various formats. Formatting
     mostly deals with working around quirks of Python's str.title(). NZB metadata is used as-is,
     further processing done only for info obtained from guessit or the jobname."""
-    title = ""
-    if nzo:
-        # Fetch NZB metadata
-        title = nzo.nzo_info.get("propername")
+    title = nzo.nzo_info.get("propername") if nzo else ""
     if not title:
         # Try guessit next
         if guess:
@@ -722,9 +721,7 @@ def replace_word(word_input: str, one: str, two: str) -> str:
 def get_descriptions(nzo: Optional[NzbObject], guess: Optional[MatchesDict], jobname: str) -> Tuple[str, str, str]:
     """Try to get an episode title or similar description from the NZB metadata or jobname, e.g.
     'Download This' in Show.S01E23.Download.This.1080p.HDTV.x264 and return multiple formats"""
-    ep_name = None
-    if nzo:
-        ep_name = nzo.nzo_info.get("episodename")
+    ep_name = nzo.nzo_info.get("episodename") if nzo else None
     if (not ep_name) and guess:
         ep_name = guess.get("episode_title")
     ep_name = ep_name or ""
@@ -739,10 +736,7 @@ def get_descriptions(nzo: Optional[NzbObject], guess: Optional[MatchesDict], job
 
 def has_subdirectory(path: str) -> bool:
     """Return True if any directory is found inside the tree at 'path'"""
-    for _root, dirs, _files in os.walk(path):
-        if dirs:
-            return True
-    return False
+    return any(dirs for _root, dirs, _files in os.walk(path))
 
 
 def to_lowercase(path: str) -> str:
@@ -828,15 +822,15 @@ def eval_sort(sort_type: str, expression: str, name: str = None, multipart: str 
 
     path = ""
     name = sanitize_foldername(name)
-    if sort_type == "series":
-        name = name or ("%s S01E05 - %s [DTS]" % (Ttemplate("show-name"), Ttemplate("ep-name")))
-        sorter = SeriesSorter(None, name, path, "tv", force=True)
+    if sort_type == "date":
+        name = name or (Ttemplate("show-name") + " 2009-01-02")
+        sorter = DateSorter(None, name, path, "tv", force=True)
     elif sort_type == "movie":
         name = name or (Ttemplate("movie-sp-name") + " (2009)")
         sorter = MovieSorter(None, name, path, "tv", force=True)
-    elif sort_type == "date":
-        name = name or (Ttemplate("show-name") + " 2009-01-02")
-        sorter = DateSorter(None, name, path, "tv", force=True)
+    elif sort_type == "series":
+        name = name or ("%s S01E05 - %s [DTS]" % (Ttemplate("show-name"), Ttemplate("ep-name")))
+        sorter = SeriesSorter(None, name, path, "tv", force=True)
     else:
         return None
     sorter.sort_string = expression
@@ -848,11 +842,10 @@ def eval_sort(sort_type: str, expression: str, name: str = None, multipart: str 
         fpath = fpath + multipart.replace("%1", "1")
     if "%fn" in path:
         path = path.replace("%fn", fname + ".ext")
+    elif sorter.rename_files:
+        path = fpath + ".ext"
     else:
-        if sorter.rename_files:
-            path = fpath + ".ext"
-        else:
-            path += "\\" if sabnzbd.WIN32 else "/"
+        path += "\\" if sabnzbd.WIN32 else "/"
     return path
 
 
@@ -878,10 +871,9 @@ def check_for_sequence(regex, files: List[str]) -> Dict[str, str]:
     for _file in files:
         name, ext = os.path.splitext(_file)
         match1 = regex.search(name)
-        if match1:
-            if not prefix or prefix == name[: match1.start()]:
-                matches[match1.group(1)] = name + ext
-                prefix = name[: match1.start()]
+        if match1 and (not prefix or prefix == name[: match1.start()]):
+            matches[match1.group(1)] = name + ext
+            prefix = name[: match1.start()]
 
     # Don't do anything if only one or no files matched
     if len(list(matches)) < 2:
@@ -900,13 +892,10 @@ def check_for_sequence(regex, files: List[str]) -> Dict[str, str]:
             passed = False
 
         if passed:
-            if not key_prev:
+            if key_prev and key_prev + 1 == key or not key_prev:
                 key_prev = key
             else:
-                if key_prev + 1 == key:
-                    key_prev = key
-                else:
-                    passed = False
+                passed = False
         if passed:
             # convert {'b':'filename-b.mkv'} to {'2', 'filename-b.mkv'}
             item = matches.pop(akey)

@@ -122,39 +122,64 @@ def send_notification(title, msg, gtype, job_cat=None):
     """Send Notification message"""
     logging.info("Sending notification: %s - %s (type=%s, job_cat=%s)", title, msg, gtype, job_cat)
     # Notification Center
-    if sabnzbd.DARWIN and sabnzbd.cfg.ncenter_enable():
-        if check_classes(gtype, "ncenter") and check_cat("ncenter", job_cat):
-            send_notification_center(title, msg, gtype)
+    if (
+        sabnzbd.DARWIN
+        and sabnzbd.cfg.ncenter_enable()
+        and check_classes(gtype, "ncenter")
+        and check_cat("ncenter", job_cat)
+    ):
+        send_notification_center(title, msg, gtype)
 
     # Windows
-    if sabnzbd.WIN32 and sabnzbd.cfg.acenter_enable():
-        if check_classes(gtype, "acenter") and check_cat("acenter", job_cat):
-            send_windows(title, msg, gtype)
+    if (
+        sabnzbd.WIN32
+        and sabnzbd.cfg.acenter_enable()
+        and check_classes(gtype, "acenter")
+        and check_cat("acenter", job_cat)
+    ):
+        send_windows(title, msg, gtype)
 
     # Prowl
-    if sabnzbd.cfg.prowl_enable() and check_cat("prowl", job_cat):
-        if sabnzbd.cfg.prowl_apikey():
-            Thread(target=send_prowl, args=(title, msg, gtype)).start()
+    if (
+        sabnzbd.cfg.prowl_enable()
+        and check_cat("prowl", job_cat)
+        and sabnzbd.cfg.prowl_apikey()
+    ):
+        Thread(target=send_prowl, args=(title, msg, gtype)).start()
 
     # Pushover
-    if sabnzbd.cfg.pushover_enable() and check_cat("pushover", job_cat):
-        if sabnzbd.cfg.pushover_token():
-            Thread(target=send_pushover, args=(title, msg, gtype)).start()
+    if (
+        sabnzbd.cfg.pushover_enable()
+        and check_cat("pushover", job_cat)
+        and sabnzbd.cfg.pushover_token()
+    ):
+        Thread(target=send_pushover, args=(title, msg, gtype)).start()
 
     # Pushbullet
-    if sabnzbd.cfg.pushbullet_enable() and check_cat("pushbullet", job_cat):
-        if sabnzbd.cfg.pushbullet_apikey() and check_classes(gtype, "pushbullet"):
-            Thread(target=send_pushbullet, args=(title, msg, gtype)).start()
+    if (
+        sabnzbd.cfg.pushbullet_enable()
+        and check_cat("pushbullet", job_cat)
+        and sabnzbd.cfg.pushbullet_apikey()
+        and check_classes(gtype, "pushbullet")
+    ):
+        Thread(target=send_pushbullet, args=(title, msg, gtype)).start()
 
     # Notification script.
-    if sabnzbd.cfg.nscript_enable() and check_cat("nscript", job_cat):
-        if sabnzbd.cfg.nscript_script():
-            Thread(target=send_nscript, args=(title, msg, gtype)).start()
+    if (
+        sabnzbd.cfg.nscript_enable()
+        and check_cat("nscript", job_cat)
+        and sabnzbd.cfg.nscript_script()
+    ):
+        Thread(target=send_nscript, args=(title, msg, gtype)).start()
 
     # NTFOSD
-    if have_ntfosd() and sabnzbd.cfg.ntfosd_enable():
-        if check_classes(gtype, "ntfosd") and check_cat("ntfosd", job_cat):
-            send_notify_osd(title, msg)
+    if (
+        have_ntfosd()
+        and sabnzbd.cfg.ntfosd_enable()
+        and check_classes(gtype, "ntfosd")
+        and check_cat("ntfosd", job_cat)
+    ):
+        send_notify_osd(title, msg)
 
 
 ##############################################################################
@@ -214,10 +239,7 @@ def send_notification_center(title, msg, gtype):
 def send_prowl(title, msg, gtype, force=False, test=None):
     """Send message to Prowl"""
 
-    if test:
-        apikey = test.get("prowl_apikey")
-    else:
-        apikey = sabnzbd.cfg.prowl_apikey()
+    apikey = test.get("prowl_apikey") if test else sabnzbd.cfg.prowl_apikey()
     if not apikey:
         return T("Cannot send, missing required data")
 
@@ -300,11 +322,10 @@ def do_send_pushover(body):
             {"Content-type": "application/x-www-form-urlencoded"},
         )
         res = conn.getresponse()
-        if res.status != 200:
-            logging.error(T("Bad response from Pushover (%s): %s"), res.status, res.read())
-            return T("Failed to send pushover message")
-        else:
+        if res.status == 200:
             return ""
+        logging.error(T("Bad response from Pushover (%s): %s"), res.status, res.read())
+        return T("Failed to send pushover message")
     except:
         logging.warning(T("Failed to send pushover message"))
         logging.info("Traceback: ", exc_info=True)

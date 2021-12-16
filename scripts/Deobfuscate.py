@@ -211,7 +211,7 @@ if run_renamer:
         print("Renaming %s to %s" % (largest_file, new_name))
 
         # With retries for Windows
-        for r in range(3):
+        for _ in range(3):
             try:
                 os.rename(largest_file, new_name)
                 print("Renaming done!")

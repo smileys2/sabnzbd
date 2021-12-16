@@ -209,17 +209,20 @@ class Article(TryList):
                     for server_check in servers:
                         if log:
                             logging.debug("Article %s | Server: %s | checking", self.article, server.host)
-                        if server_check.active and (server_check.priority < found_priority):
-                            if server_check.priority < server.priority:
-                                if not self.server_in_try_list(server_check):
-                                    if log:
-                                        logging.debug(
-                                            "Article %s | Server: %s | setting found priority to %s",
-                                            self.article,
-                                            server.host,
-                                            server_check.priority,
-                                        )
-                                    found_priority = server_check.priority
+                        if (
+                            server_check.active
+                            and (server_check.priority < found_priority)
+                            and server_check.priority < server.priority
+                            and not self.server_in_try_list(server_check)
+                        ):
+                            if log:
+                                logging.debug(
+                                    "Article %s | Server: %s | setting found priority to %s",
+                                    self.article,
+                                    server.host,
+                                    server_check.priority,
+                                )
+                            found_priority = server_check.priority
                     if found_priority == 1000:
                         # If no higher priority servers, use this server
                         self.fetcher_priority = server.priority
@@ -252,21 +255,22 @@ class Article(TryList):
         self.add_to_try_list(self.fetcher)
         # Servers-list could be modified during iteration, so we need a copy
         for server in sabnzbd.Downloader.servers[:]:
-            if server.active and not self.server_in_try_list(server):
-                if server.priority >= self.fetcher.priority:
-                    self.tries = 0
-                    # Allow all servers for this nzo and nzf again (but not this fetcher for this article)
-                    sabnzbd.NzbQueue.reset_try_lists(self, remove_fetcher_from_trylist=False)
-                    return True
+            if (
+                server.active
+                and not self.server_in_try_list(server)
+                and server.priority >= self.fetcher.priority
+            ):
+                self.tries = 0
+                # Allow all servers for this nzo and nzf again (but not this fetcher for this article)
+                sabnzbd.NzbQueue.reset_try_lists(self, remove_fetcher_from_trylist=False)
+                return True
 
         logging.info("Article %s unavailable on all servers, discarding", self.article)
         return False
 
     def __getstate__(self):
         """Save to pickle file, selecting attributes"""
-        dict_ = {}
-        for item in ArticleSaver:
-            dict_[item] = getattr(self, item)
+        dict_ = {item: getattr(self, item) for item in ArticleSaver}
         dict_["try_list"] = super().__getstate__()
         return dict_
 
@@ -467,9 +471,7 @@ class NzbFile(TryList):
 
     def __getstate__(self):
         """Save to pickle file, selecting attributes"""
-        dict_ = {}
-        for item in NzbFileSaver:
-            dict_[item] = getattr(self, item)
+        dict_ = {item: getattr(self, item) for item in NzbFileSaver}
         dict_["try_list"] = super().__getstate__()
         return dict_
 

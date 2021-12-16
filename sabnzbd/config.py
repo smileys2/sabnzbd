@@ -105,12 +105,15 @@ class Option:
     def set(self, value: Any):
         """Set new value, no validation"""
         global modified
-        if value is not None:
-            if isinstance(value, list) or isinstance(value, dict) or value != self.__value:
-                self.__value = value
-                modified = True
-                if self.__callback:
-                    self.__callback()
+        if value is not None and (
+            isinstance(value, list)
+            or isinstance(value, dict)
+            or value != self.__value
+        ):
+            self.__value = value
+            modified = True
+            if self.__callback:
+                self.__callback()
 
     def default(self) -> Any:
         return self.__default_val
@@ -146,23 +149,21 @@ class OptionNumber(Option):
 
     def set(self, value: Any):
         """set new value, limited by range"""
-        if value is not None:
-            try:
-                if self.__int:
-                    value = int(value)
-                else:
-                    value = float(value)
-            except ValueError:
-                value = super().default()
-            if self.__validation:
-                _, val = self.__validation(value)
-                super().set(val)
-            else:
-                if self.__maxval is not None and value > self.__maxval:
-                    value = self.__maxval
-                elif self.__minval is not None and value < self.__minval:
-                    value = self.__minval
-                super().set(value)
+        if value is None:
+            return
+        try:
+            value = int(value) if self.__int else float(value)
+        except ValueError:
+            value = super().default()
+        if self.__validation:
+            _, val = self.__validation(value)
+            super().set(val)
+        else:
+            if self.__maxval is not None and value > self.__maxval:
+                value = self.__maxval
+            elif self.__minval is not None and value < self.__minval:
+                value = self.__minval
+            super().set(value)
 
     def __call__(self) -> Union[int, float]:
         """get() replacement"""
@@ -250,11 +251,10 @@ class OptionDir(Option):
             value = value.strip()
             if self.__validation:
                 error, value = self.__validation(self.__root, value, super().default())
-            if not error:
-                if value and (self.__create or create):
-                    res, path, error = create_real_path(
-                        self.ident()[1], self.__root, value, self.__apply_umask, self.__writable
-                    )
+            if not error and value and (self.__create or create):
+                res, path, error = create_real_path(
+                    self.ident()[1], self.__root, value, self.__apply_umask, self.__writable
+                )
             if not error:
                 super().set(value)
         return error
@@ -462,9 +462,7 @@ class ConfigServer:
 
     def get_dict(self, safe: bool = False) -> Dict[str, Any]:
         """Return a dictionary with all attributes"""
-        output_dict = {}
-        output_dict["name"] = self.__name
-        output_dict["displayname"] = self.displayname()
+        output_dict = {'name': self.__name, 'displayname': self.displayname()}
         output_dict["host"] = self.host()
         output_dict["port"] = self.port()
         output_dict["timeout"] = self.timeout()
@@ -529,9 +527,7 @@ class ConfigCat:
 
     def get_dict(self, safe: bool = False) -> Dict[str, Any]:
         """Return a dictionary with all attributes"""
-        output_dict = {}
-        output_dict["name"] = self.__name
-        output_dict["order"] = self.order()
+        output_dict = {'name': self.__name, 'order': self.order()}
         output_dict["pp"] = self.pp()
         output_dict["script"] = self.script()
         output_dict["dir"] = self.dir()
@@ -583,10 +579,7 @@ class OptionFilters(Option):
 
     def get_dict(self, safe: bool = False) -> Dict[str, str]:
         """Return filter list as a dictionary with keys 'filter[0-9]+'"""
-        output_dict = {}
-        for n, rss_filter in enumerate(self.get()):
-            output_dict[f"filter{n}"] = rss_filter
-        return output_dict
+        return {f"filter{n}": rss_filter for n, rss_filter in enumerate(self.get())}
 
     def set_dict(self, values: Dict[str, Any]):
         """Create filter list from dictionary with keys 'filter[0-9]+'"""
@@ -635,9 +628,7 @@ class ConfigRSS:
 
     def get_dict(self, safe: bool = False) -> Dict[str, Any]:
         """Return a dictionary with all attributes"""
-        output_dict = {}
-        output_dict["name"] = self.__name
-        output_dict["uri"] = self.uri()
+        output_dict = {'name': self.__name, 'uri': self.uri()}
         output_dict["cat"] = self.cat()
         output_dict["pp"] = self.pp()
         output_dict["script"] = self.script()
@@ -970,10 +961,11 @@ def get_ordered_categories() -> List[Dict]:
     database_cats = get_categories()
 
     # Transform to list and sort
-    categories = []
-    for cat in database_cats.keys():
-        if cat != "*":
-            categories.append(database_cats[cat].get_dict())
+    categories = [
+        database_cats[cat].get_dict()
+        for cat in database_cats.keys()
+        if cat != "*"
+    ]
 
     # Sort and add default * category
     categories.sort(key=lambda cat: cat["order"])
@@ -1046,18 +1038,17 @@ def decode_password(pw, name):
     """Decode hexadecimal encoded password
     but only decode when prefixed
     """
-    decPW = ""
-    if pw and pw.startswith(__PW_PREFIX):
-        for n in range(len(__PW_PREFIX), len(pw), 2):
-            try:
-                ch = chr(int(pw[n] + pw[n + 1], 16))
-            except ValueError:
-                logging.error(T("Incorrectly encoded password %s"), name)
-                return ""
-            decPW += ch
-        return decPW
-    else:
+    if not pw or not pw.startswith(__PW_PREFIX):
         return pw
+    decPW = ""
+    for n in range(len(__PW_PREFIX), len(pw), 2):
+        try:
+            ch = chr(int(pw[n] + pw[n + 1], 16))
+        except ValueError:
+            logging.error(T("Incorrectly encoded password %s"), name)
+            return ""
+        decPW += ch
+    return decPW
 
 
 def clean_nice_ionice_parameters(value):
@@ -1138,9 +1129,8 @@ def validate_single_tag(value: List[str]) -> Tuple[None, List[str]]:
     """Don't split single indexer tags like "TV > HD"
     into ['TV', '>', 'HD']
     """
-    if len(value) == 3:
-        if value[1] == ">":
-            return None, [" ".join(value)]
+    if len(value) == 3 and value[1] == ">":
+        return None, [" ".join(value)]
     return None, value
 
 

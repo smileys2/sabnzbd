@@ -96,8 +96,7 @@ def api_handler(kwargs: Dict[str, Any]):
     mode = kwargs.get("mode", "")
     name = kwargs.get("name", "")
 
-    response = _api_table.get(mode, (_api_undefined, 2))[0](name, kwargs)
-    return response
+    return _api_table.get(mode, (_api_undefined, 2))[0](name, kwargs)
 
 
 def _api_get_config(name, kwargs):
@@ -277,24 +276,23 @@ def _api_queue_rating(value, kwargs):
     }
     content_type = kwargs.get("type")
     setting = kwargs.get("setting")
-    if value:
-        try:
-            video = audio = vote = flag = None
-            if content_type == "video" and setting != "-":
-                video = setting
-            if content_type == "audio" and setting != "-":
-                audio = setting
-            if content_type == "vote":
-                vote = vote_map[setting]
-            if content_type == "flag":
-                flag = flag_map[setting]
-            if cfg.rating_enable():
-                sabnzbd.Rating.update_user_rating(value, video, audio, vote, flag, kwargs.get("detail"))
-            return report()
-        except:
-            return report(_MSG_BAD_SERVER_PARMS)
-    else:
+    if not value:
         return report(_MSG_NO_VALUE)
+    try:
+        video = audio = vote = flag = None
+        if content_type == "video" and setting != "-":
+            video = setting
+        if content_type == "audio" and setting != "-":
+            audio = setting
+        if content_type == "vote":
+            vote = vote_map[setting]
+        if content_type == "flag":
+            flag = flag_map[setting]
+        if cfg.rating_enable():
+            sabnzbd.Rating.update_user_rating(value, video, audio, vote, flag, kwargs.get("detail"))
+        return report()
+    except:
+        return report(_MSG_BAD_SERVER_PARMS)
 
 
 def _api_options(name, kwargs):
@@ -812,10 +810,7 @@ def _api_rss_now(name, kwargs):
 def _api_retry_all(name, kwargs):
     """API: Retry all failed items in History"""
     items = sabnzbd.api.build_history()[0]
-    nzo_ids = []
-    for item in items:
-        if item["retry"]:
-            nzo_ids.append(retry_job(item["nzo_id"]))
+    nzo_ids = [retry_job(item["nzo_id"]) for item in items if item["retry"]]
     return report(keyword="status", data=nzo_ids)
 
 
@@ -1133,11 +1128,10 @@ def report(error: Optional[str] = None, keyword: str = "value", data: Any = None
             info = {"status": False, "error": error}
         elif data is None:
             info = {"status": True}
+        elif hasattr(data, "__iter__") and not keyword:
+            info = data
         else:
-            if hasattr(data, "__iter__") and not keyword:
-                info = data
-            else:
-                info = {keyword: data}
+            info = {keyword: data}
         response = utob(json.dumps(info))
 
     elif output == "xml":
@@ -1179,15 +1173,11 @@ class XmlOutputFactory:
         self.__text = ""
 
     def _tuple(self, keyw, lst):
-        text = []
-        for item in lst:
-            text.append(self.run(keyw, item))
+        text = [self.run(keyw, item) for item in lst]
         return "".join(text)
 
     def _dict(self, keyw, lst):
-        text = []
-        for key in lst.keys():
-            text.append(self.run(key, lst[key]))
+        text = [self.run(key, lst[key]) for key in lst.keys()]
         if keyw:
             return "<%s>%s</%s>\n" % (keyw, "".join(text), keyw)
         else:
@@ -1214,16 +1204,15 @@ class XmlOutputFactory:
 
     def run(self, keyw, lst):
         if isinstance(lst, dict):
-            text = self._dict(keyw, lst)
+            return self._dict(keyw, lst)
         elif isinstance(lst, list):
-            text = self._list(keyw, lst)
+            return self._list(keyw, lst)
         elif isinstance(lst, tuple):
-            text = self._tuple(keyw, lst)
+            return self._tuple(keyw, lst)
         elif keyw:
-            text = "<%s>%s</%s>\n" % (keyw, xml_name(lst), keyw)
+            return "<%s>%s</%s>\n" % (keyw, xml_name(lst), keyw)
         else:
-            text = ""
-        return text
+            return ""
 
 
 def handle_server_api(kwargs):
@@ -1364,7 +1353,7 @@ def build_status(calculate_performance: bool = False, skip_dashboard: bool = Fal
                     }
                 )
 
-        if server.warning and not (connected or server.errormsg):
+        if server.warning and not connected and not server.errormsg:
             connected = server.warning
 
         if server.request and not server.info:

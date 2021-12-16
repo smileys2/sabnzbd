@@ -66,8 +66,6 @@ elif os.name == "posix":
     except:
         # No malloc_trim(), probably because no glibc
         LIBC = None
-        pass
-
     # Parse macOS version numbers
     if platform.system().lower() == "darwin":
         DARWIN = True
@@ -362,89 +360,91 @@ def start():
 
 @synchronized(INIT_LOCK)
 def halt():
-    if sabnzbd.__INITIALIZED__:
-        logging.info("SABnzbd shutting down...")
-        sabnzbd.__SHUTTING_DOWN__ = True
+    if not sabnzbd.__INITIALIZED__:
+        return
 
-        # Stop the windows tray icon
-        if sabnzbd.WINTRAY:
-            sabnzbd.WINTRAY.stop()
+    logging.info("SABnzbd shutting down...")
+    sabnzbd.__SHUTTING_DOWN__ = True
 
-        # Remove registry information
-        if sabnzbd.WIN32:
-            del_connection_info()
+    # Stop the windows tray icon
+    if sabnzbd.WINTRAY:
+        sabnzbd.WINTRAY.stop()
 
-        sabnzbd.zconfig.remove_server()
-        sabnzbd.utils.ssdp.stop_ssdp()
+    # Remove registry information
+    if sabnzbd.WIN32:
+        del_connection_info()
 
-        sabnzbd.directunpacker.abort_all()
+    sabnzbd.zconfig.remove_server()
+    sabnzbd.utils.ssdp.stop_ssdp()
 
-        logging.debug("Stopping RSSReader")
-        sabnzbd.RSSReader.stop()
+    sabnzbd.directunpacker.abort_all()
 
-        logging.debug("Stopping URLGrabber")
-        sabnzbd.URLGrabber.stop()
-        try:
-            sabnzbd.URLGrabber.join()
-        except:
-            pass
+    logging.debug("Stopping RSSReader")
+    sabnzbd.RSSReader.stop()
 
-        logging.debug("Stopping rating")
-        sabnzbd.Rating.stop()
-        try:
-            sabnzbd.Rating.join()
-        except:
-            pass
+    logging.debug("Stopping URLGrabber")
+    sabnzbd.URLGrabber.stop()
+    try:
+        sabnzbd.URLGrabber.join()
+    except:
+        pass
 
-        logging.debug("Stopping dirscanner")
-        sabnzbd.DirScanner.stop()
-        try:
-            sabnzbd.DirScanner.join()
-        except:
-            pass
+    logging.debug("Stopping rating")
+    sabnzbd.Rating.stop()
+    try:
+        sabnzbd.Rating.join()
+    except:
+        pass
 
-        logging.debug("Stopping downloader")
-        sabnzbd.Downloader.stop()
-        try:
-            sabnzbd.Downloader.join()
-        except:
-            pass
+    logging.debug("Stopping dirscanner")
+    sabnzbd.DirScanner.stop()
+    try:
+        sabnzbd.DirScanner.join()
+    except:
+        pass
 
-        # Decoder handles join gracefully
-        logging.debug("Stopping decoders")
-        sabnzbd.Decoder.stop()
-        sabnzbd.Decoder.join()
+    logging.debug("Stopping downloader")
+    sabnzbd.Downloader.stop()
+    try:
+        sabnzbd.Downloader.join()
+    except:
+        pass
 
-        logging.debug("Stopping assembler")
-        sabnzbd.Assembler.stop()
-        try:
-            sabnzbd.Assembler.join()
-        except:
-            pass
+    # Decoder handles join gracefully
+    logging.debug("Stopping decoders")
+    sabnzbd.Decoder.stop()
+    sabnzbd.Decoder.join()
 
-        logging.debug("Stopping postprocessor")
-        sabnzbd.PostProcessor.stop()
-        try:
-            sabnzbd.PostProcessor.join()
-        except:
-            pass
+    logging.debug("Stopping assembler")
+    sabnzbd.Assembler.stop()
+    try:
+        sabnzbd.Assembler.join()
+    except:
+        pass
 
-        # Save State
-        try:
-            save_state()
-        except:
-            logging.error(T("Fatal error at saving state"), exc_info=True)
+    logging.debug("Stopping postprocessor")
+    sabnzbd.PostProcessor.stop()
+    try:
+        sabnzbd.PostProcessor.join()
+    except:
+        pass
 
-        # The Scheduler cannot be stopped when the stop was scheduled.
-        # Since all warm-restarts have been removed, it's not longer
-        # needed to stop the scheduler.
-        # We must tell the scheduler to deactivate.
-        logging.debug("Terminating scheduler")
-        sabnzbd.Scheduler.abort()
+    # Save State
+    try:
+        save_state()
+    except:
+        logging.error(T("Fatal error at saving state"), exc_info=True)
 
-        logging.info("All processes stopped")
+    # The Scheduler cannot be stopped when the stop was scheduled.
+    # Since all warm-restarts have been removed, it's not longer
+    # needed to stop the scheduler.
+    # We must tell the scheduler to deactivate.
+    logging.debug("Terminating scheduler")
+    sabnzbd.Scheduler.abort()
 
-        sabnzbd.__INITIALIZED__ = False
+    logging.info("All processes stopped")
+
+    sabnzbd.__INITIALIZED__ = False
 
 
 def notify_shutdown_loop():
@@ -494,10 +494,7 @@ def guard_top_only():
 
 def guard_pause_on_pp():
     """Callback for change of pause-download-on-pp"""
-    if cfg.pause_on_post_processing():
-        pass  # Not safe to idle downloader, because we don't know
-        # if post-processing is active now
-    else:
+    if not cfg.pause_on_post_processing():
         sabnzbd.Downloader.resume_from_postproc()
 
 
@@ -609,10 +606,7 @@ def backup_nzb(filename: str, data: AnyStr):
 
 def save_compressed(folder: str, filename: str, data: AnyStr):
     """Save compressed NZB file in folder"""
-    if filename.endswith(".nzb"):
-        filename += ".gz"
-    else:
-        filename += ".nzb.gz"
+    filename += ".gz" if filename.endswith(".nzb") else ".nzb.gz"
     logging.info("Backing up %s", os.path.join(folder, filename))
     try:
         # Have to get around the path being put inside the tgz
@@ -838,24 +832,24 @@ def run_script(script):
 
 def keep_awake():
     """If we still have work to do, keep Windows/macOS system awake"""
-    if KERNEL32 or FOUNDATION:
-        if sabnzbd.cfg.keep_awake():
-            ES_CONTINUOUS = 0x80000000
-            ES_SYSTEM_REQUIRED = 0x00000001
-            if (not sabnzbd.Downloader.is_paused() and not sabnzbd.NzbQueue.is_empty()) or (
+    if not KERNEL32 and not FOUNDATION:
+        return
+    if sabnzbd.cfg.keep_awake():
+        ES_CONTINUOUS = 0x80000000
+        if (not sabnzbd.Downloader.is_paused() and not sabnzbd.NzbQueue.is_empty()) or (
                 not sabnzbd.PostProcessor.paused and not sabnzbd.PostProcessor.empty()
             ):
-                if KERNEL32:
-                    # Set ES_SYSTEM_REQUIRED until the next call
-                    KERNEL32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
-                else:
-                    sleepless.keep_awake("SABnzbd is busy downloading and/or post-processing")
+            if KERNEL32:
+                ES_SYSTEM_REQUIRED = 0x00000001
+                # Set ES_SYSTEM_REQUIRED until the next call
+                KERNEL32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
             else:
-                if KERNEL32:
-                    # Allow the regular state again
-                    KERNEL32.SetThreadExecutionState(ES_CONTINUOUS)
-                else:
-                    sleepless.allow_sleep()
+                sleepless.keep_awake("SABnzbd is busy downloading and/or post-processing")
+        elif KERNEL32:
+            # Allow the regular state again
+            KERNEL32.SetThreadExecutionState(ES_CONTINUOUS)
+        else:
+            sleepless.allow_sleep()
 
 
 ################################################################################
@@ -867,7 +861,7 @@ def get_new_id(prefix, folder, check_list=None):
     """Return unique prefixed admin identifier within folder
     optionally making sure that id is not in the check_list.
     """
-    for n in range(100):
+    for _ in range(100):
         try:
             if not os.path.exists(folder):
                 os.makedirs(folder)
@@ -1110,7 +1104,7 @@ def test_ipv6():
         af, socktype, proto, canonname, sa = info[0]
         with socket.socket(af, socktype, proto) as sock:
             sock.settimeout(2)  # 2 second timeout
-            sock.connect(sa[0:2])
+            sock.connect(sa[:2])
         logging.debug("Test IPv6: IPv6 test successful. Enabling IPv6")
         return True
     except socket.error:

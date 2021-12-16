@@ -42,13 +42,7 @@ DB_LOCK = threading.RLock()
 
 def convert_search(search):
     """Convert classic wildcard to SQL wildcard"""
-    if not search:
-        # Default value
-        search = ""
-    else:
-        # Allow * for wildcard matching and space
-        search = search.replace("*", "%").replace(" ", "%")
-
+    search = "" if not search else search.replace("*", "%").replace(" ", "%")
     # Allow ^ for start of string and $ for end of string
     if search and search.startswith("^"):
         search = search.replace("^", "")
@@ -465,9 +459,11 @@ def build_history_info(nzo, workdir_complete="", postproc_time=0, script_output=
     # Get the dictionary containing the stages and their unpack process
     # Pack the dictionary up into a single string
     # Stage Name is separated by ::: stage lines by ; and stages by \r\n
-    lines = []
-    for key, results in nzo.unpack_info.items():
-        lines.append("%s:::%s" % (key, ";".join(results)))
+    lines = [
+        "%s:::%s" % (key, ";".join(results))
+        for key, results in nzo.unpack_info.items()
+    ]
+
     stage_log = "\r\n".join(lines)
 
     # Reuse the old 'report' column to indicate a URL-fetch

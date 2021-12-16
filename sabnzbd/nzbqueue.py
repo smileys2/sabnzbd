@@ -79,7 +79,7 @@ class NzbQueue:
                 data = sabnzbd.load_admin(QUEUE_FILE_NAME)
                 if data:
                     queue_vers, nzo_ids, _ = data
-                    if not queue_vers == QUEUE_VERSION:
+                    if queue_vers != QUEUE_VERSION:
                         nzo_ids = []
                         logging.error(T("Incompatible queuefile found, cannot proceed"))
                         if not repair:
@@ -135,11 +135,7 @@ class NzbQueue:
         """
         result = []
         # Folders from the download queue
-        if all_jobs:
-            registered = []
-        else:
-            registered = [nzo.work_name for nzo in self.__nzo_list]
-
+        registered = [] if all_jobs else [nzo.work_name for nzo in self.__nzo_list]
         # Retryable folders from History
         items = sabnzbd.api.build_history()[0]
         # Anything waiting or active or retryable is a known item
@@ -159,9 +155,8 @@ class NzbQueue:
                     logging.info("Repairing job %s", folder)
                     self.repair_job(folder)
                 result.append(os.path.basename(folder))
-            else:
-                if action:
-                    logging.info("Skipping repair for job %s", folder)
+            elif action:
+                logging.info("Skipping repair for job %s", folder)
         return result
 
     def repair_job(
@@ -342,32 +337,33 @@ class NzbQueue:
             nzo.status = Status.PAUSED
 
         self.__nzo_table[nzo.nzo_id] = nzo
-        if priority > HIGH_PRIORITY:
-            # Top and repair priority items are added to the top of the queue
-            self.__nzo_list.insert(0, nzo)
-        elif priority == LOW_PRIORITY:
+        if (
+            priority <= HIGH_PRIORITY
+            and priority != LOW_PRIORITY
+            and self.__nzo_list
+        ):
+            pos = 0
+            added = False
+            for position in self.__nzo_list:
+                if position.priority < priority:
+                    self.__nzo_list.insert(pos, nzo)
+                    added = True
+                    break
+                pos += 1
+            if not added:
+                # if there are no other items classed as a lower priority
+                # then it will be added to the bottom of the queue
+                self.__nzo_list.append(nzo)
+        elif (
+            priority <= HIGH_PRIORITY
+            and priority != LOW_PRIORITY
+            or priority <= HIGH_PRIORITY
+        ):
+            # if the queue is empty then simple append the item to the bottom
             self.__nzo_list.append(nzo)
         else:
-            # for high priority we need to add the item at the bottom
-            # of any other high priority items above the normal priority
-            # for normal priority we need to add the item at the bottom
-            # of the normal priority items above the low priority
-            if self.__nzo_list:
-                pos = 0
-                added = False
-                for position in self.__nzo_list:
-                    if position.priority < priority:
-                        self.__nzo_list.insert(pos, nzo)
-                        added = True
-                        break
-                    pos += 1
-                if not added:
-                    # if there are no other items classed as a lower priority
-                    # then it will be added to the bottom of the queue
-                    self.__nzo_list.append(nzo)
-            else:
-                # if the queue is empty then simple append the item to the bottom
-                self.__nzo_list.append(nzo)
+            # Top and repair priority items are added to the top of the queue
+            self.__nzo_list.insert(0, nzo)
         if save:
             self.save(nzo)
 
@@ -406,10 +402,11 @@ class NzbQueue:
 
     @NzbQueueLocker
     def remove_multiple(self, nzo_ids: List[str], delete_all_data=True) -> List[str]:
-        removed = []
-        for nzo_id in nzo_ids:
-            if self.remove(nzo_id, delete_all_data=delete_all_data):
-                removed.append(nzo_id)
+        removed = [
+            nzo_id
+            for nzo_id in nzo_ids
+            if self.remove(nzo_id, delete_all_data=delete_all_data)
+        ]
 
         # Any files left? Otherwise let's disconnect
         if self.actives(grabs=False) == 0 and cfg.autodisconnect():
@@ -421,11 +418,13 @@ class NzbQueue:
     @NzbQueueLocker
     def remove_all(self, search: Optional[str] = None) -> List[str]:
         """Remove NZO's that match the search-pattern"""
-        nzo_ids = []
         search = safe_lower(search)
-        for nzo_id, nzo in self.__nzo_table.items():
-            if not search or search in nzo.final_name.lower():
-                nzo_ids.append(nzo_id)
+        nzo_ids = [
+            nzo_id
+            for nzo_id, nzo in self.__nzo_table.items()
+            if not search or search in nzo.final_name.lower()
+        ]
+
         return self.remove_multiple(nzo_ids)
 
     def remove_nzfs(self, nzo_id: str, nzf_ids: List[str]) -> List[str]:
@@ -584,13 +583,10 @@ class NzbQueue:
         """Sort queue by field: "name", "size" or "avg_age"
         Direction is specified as "desc" or "asc"
         """
-        if safe_lower(direction) == "desc":
-            reverse = True
-        else:
-            reverse = False
+        reverse = safe_lower(direction) == "desc"
         if field.lower() == "name":
             self.sort_by_name(reverse)
-        elif field.lower() == "size" or field.lower() == "bytes":
+        elif field.lower() in ["size", "bytes"]:
             self.sort_by_size(reverse)
         elif field.lower() == "avg_age":
             self.sort_by_avg_age(not reverse)
@@ -642,30 +638,25 @@ class NzbQueue:
                 elif priority == LOW_PRIORITY:
                     pos = len(self.__nzo_list)
                     self.__nzo_list.append(nzo)
-                else:
-                    # for high priority we need to add the item at the bottom
-                    # of any other high priority items above the normal priority
-                    # for normal priority we need to add the item at the bottom
-                    # of the normal priority items above the low priority
-                    if self.__nzo_list:
-                        p = 0
-                        added = False
-                        for position in self.__nzo_list:
-                            if position.priority < priority:
-                                self.__nzo_list.insert(p, nzo)
-                                pos = p
-                                added = True
-                                break
-                            p += 1
-                        if not added:
-                            # if there are no other items classed as a lower priority
-                            # then it will be added to the bottom of the queue
-                            pos = len(self.__nzo_list)
-                            self.__nzo_list.append(nzo)
-                    else:
-                        # if the queue is empty then simple append the item to the bottom
+                elif self.__nzo_list:
+                    p = 0
+                    added = False
+                    for position in self.__nzo_list:
+                        if position.priority < priority:
+                            self.__nzo_list.insert(p, nzo)
+                            pos = p
+                            added = True
+                            break
+                        p += 1
+                    if not added:
+                        # if there are no other items classed as a lower priority
+                        # then it will be added to the bottom of the queue
+                        pos = len(self.__nzo_list)
                         self.__nzo_list.append(nzo)
-                        pos = 0
+                else:
+                    # if the queue is empty then simple append the item to the bottom
+                    self.__nzo_list.append(nzo)
+                    pos = 0
 
             logging.info(
                 "Set priority=%s for job %s => position=%s ", priority, self.__nzo_table[nzo_id].final_name, pos
@@ -699,10 +690,11 @@ class NzbQueue:
         """Check if the queue contains any Forced
         Priority items to download while paused
         """
-        for nzo in self.__nzo_list:
-            if nzo.priority == FORCE_PRIORITY and nzo.status not in (Status.PAUSED, Status.GRABBING):
-                return True
-        return False
+        return any(
+            nzo.priority == FORCE_PRIORITY
+            and nzo.status not in (Status.PAUSED, Status.GRABBING)
+            for nzo in self.__nzo_list
+        )
 
     def get_articles(self, server: Server, servers: List[Server], fetch_limit: int) -> List[Article]:
         """Get next article for jobs in the queue
@@ -712,20 +704,23 @@ class NzbQueue:
         propagation_delay = float(cfg.propagation_delay() * 60)
         for nzo in self.__nzo_list:
             # Not when queue paused and not a forced item
-            if nzo.status not in (Status.PAUSED, Status.GRABBING) or nzo.priority == FORCE_PRIORITY:
-                # Check if past propagation delay, or forced
-                if (
+            if (
+                nzo.status not in (Status.PAUSED, Status.GRABBING)
+                or nzo.priority == FORCE_PRIORITY
+            ) and (
+                (
                     not propagation_delay
                     or nzo.priority == FORCE_PRIORITY
                     or (nzo.avg_stamp + propagation_delay) < time.time()
-                ):
-                    if not nzo.server_in_try_list(server):
-                        articles = nzo.get_articles(server, servers, fetch_limit)
-                        if articles:
-                            return articles
-                    # Stop after first job that wasn't paused/propagating/etc
-                    if self.__top_only:
-                        return []
+                )
+            ):
+                if not nzo.server_in_try_list(server):
+                    articles = nzo.get_articles(server, servers, fetch_limit)
+                    if articles:
+                        return articles
+                # Stop after first job that wasn't paused/propagating/etc
+                if self.__top_only:
+                    return []
         return []
 
     def register_article(self, article: Article, success: bool = True):
@@ -745,15 +740,17 @@ class NzbQueue:
             logging.debug("Discarding article for file %s, no longer in queue", nzf.filename)
         else:
             # Write data if file is done or at trigger time
-            if file_done or (articles_left and (articles_left % DIRECT_WRITE_TRIGGER) == 0):
-                if not nzo.precheck:
-                    # Only start decoding if we have a filename and type
-                    # The type is only set if sabyenc could decode the article
-                    if nzf.filename and nzf.type:
-                        sabnzbd.Assembler.process(nzo, nzf, file_done)
-                    elif nzf.filename.lower().endswith(".par2"):
-                        # Broken par2 file, try to get another one
-                        nzo.promote_par2(nzf)
+            if (
+                file_done
+                or (articles_left and (articles_left % DIRECT_WRITE_TRIGGER) == 0)
+            ) and not nzo.precheck:
+                # Only start decoding if we have a filename and type
+                # The type is only set if sabyenc could decode the article
+                if nzf.filename and nzf.type:
+                    sabnzbd.Assembler.process(nzo, nzf, file_done)
+                elif nzf.filename.lower().endswith(".par2"):
+                    # Broken par2 file, try to get another one
+                    nzo.promote_par2(nzf)
 
             # Save bookkeeping in case of crash
             if file_done and (nzo.next_save is None or time.time() > nzo.next_save):
@@ -784,9 +781,6 @@ class NzbQueue:
                     # Enough data present, do real download
                     self.send_back(nzo)
                     return
-                else:
-                    # Not enough data, let postprocessor show it as failed
-                    pass
             sabnzbd.Assembler.process(nzo)
 
     def actives(self, grabs: bool = True) -> int:
@@ -828,11 +822,12 @@ class NzbQueue:
                 if n < start:
                     bytes_left_previous_page += b_left
 
-            if (not search) or search in nzo.final_name.lower():
-                if (not nzo_ids) or nzo.nzo_id in nzo_ids:
-                    if (not limit) or (start <= n < start + limit):
-                        pnfo_list.append(nzo.gather_info())
-                    n += 1
+            if ((not search) or search in nzo.final_name.lower()) and (
+                (not nzo_ids) or nzo.nzo_id in nzo_ids
+            ):
+                if (not limit) or (start <= n < start + limit):
+                    pnfo_list.append(nzo.gather_info())
+                n += 1
 
         if not search and not nzo_ids:
             n = len(self.__nzo_list)
@@ -842,19 +837,15 @@ class NzbQueue:
         """Return bytes left in the queue by non-paused items
         Not locked for performance, only reads the queue
         """
-        bytes_left = 0
-        for nzo in self.__nzo_list:
-            if nzo.status != Status.PAUSED:
-                bytes_left += nzo.remaining
-        return bytes_left
+        return sum(
+            nzo.remaining for nzo in self.__nzo_list if nzo.status != Status.PAUSED
+        )
 
     def is_empty(self) -> bool:
-        empty = True
-        for nzo in self.__nzo_list:
-            if not nzo.futuretype and nzo.status != Status.PAUSED:
-                empty = False
-                break
-        return empty
+        return not any(
+            not nzo.futuretype and nzo.status != Status.PAUSED
+            for nzo in self.__nzo_list
+        )
 
     def stop_idle_jobs(self):
         """Detect jobs that have zero files left and send them to post processing"""
@@ -915,8 +906,8 @@ class NzbQueue:
             nzo = self.__nzo_table[nzo_id]
             if nzo.futuretype:
                 url = nzo.url
-                if nzo.futuretype and url.lower().startswith("http"):
-                    lst.append((url, nzo))
+            if nzo.futuretype and url.lower().startswith("http"):
+                lst.append((url, nzo))
         return lst
 
     def __repr__(self):

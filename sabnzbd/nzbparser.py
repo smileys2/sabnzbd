@@ -67,11 +67,7 @@ def nzbfile_parser(raw_data: str, nzo):
 
     # Parse the files
     for file in nzb_tree.iter("file"):
-        # Get subject and date
-        file_name = ""
-        if file.attrib.get("subject"):
-            file_name = file.attrib.get("subject")
-
+        file_name = file.attrib.get("subject") or ""
         # Don't fail if no date present
         try:
             file_date = datetime.datetime.fromtimestamp(int(file.attrib.get("date")))
@@ -343,10 +339,9 @@ def process_single_nzb(
         if data.find("<nzb") >= 0 > data.find("</nzb"):
             # Looks like an incomplete file, retry
             return -2, nzo_ids
-        else:
-            # Something else is wrong, show error
-            logging.error(T("Error while adding %s, removing"), filename, exc_info=True)
-            return -1, nzo_ids
+        # Something else is wrong, show error
+        logging.error(T("Error while adding %s, removing"), filename, exc_info=True)
+        return -1, nzo_ids
 
     if nzo:
         if nzo_id:

@@ -141,10 +141,7 @@ class SysTrayIconThread(Thread):
 
     def refresh_icon(self):
         hicon = self.get_icon(self.icon)
-        if self.notify_id:
-            message = win32gui.NIM_MODIFY
-        else:
-            message = win32gui.NIM_ADD
+        message = win32gui.NIM_MODIFY if self.notify_id else win32gui.NIM_ADD
         self.notify_id = (
             self.hwnd,
             0,
@@ -218,17 +215,16 @@ class SysTrayIconThread(Thread):
 
             if option_id in self.menu_actions_by_id:
                 item, extras = win32gui_struct.PackMENUITEMINFO(text=option_text, hbmpItem=option_icon, wID=option_id)
-                win32gui.InsertMenuItem(menu, 0, 1, item)
             elif option_text == "SEPARATOR":
                 item, extras = win32gui_struct.PackMENUITEMINFO(fType=win32con.MFT_SEPARATOR)
-                win32gui.InsertMenuItem(menu, 0, 1, item)
             else:
                 submenu = win32gui.CreatePopupMenu()
                 self.create_menu(submenu, option_action)
                 item, extras = win32gui_struct.PackMENUITEMINFO(
                     text=option_text, hbmpItem=option_icon, hSubMenu=submenu
                 )
-                win32gui.InsertMenuItem(menu, 0, 1, item)
+
+            win32gui.InsertMenuItem(menu, 0, 1, item)
 
     def prep_menu_icon(self, icon):
         # First load the icon.

@@ -166,8 +166,8 @@ def cat_to_opts(cat, pp=None, script=None, priority=None) -> Tuple[str, int, str
 
     if priority is None or priority == "" or priority == DEFAULT_PRIORITY:
         priority = my_cat.priority()
-        if priority == DEFAULT_PRIORITY:
-            priority = def_cat.priority()
+    if priority == DEFAULT_PRIORITY:
+        priority = def_cat.priority()
 
     logging.debug("Parsing category %s to attributes: pp=%s script=%s prio=%s", cat, pp, script, priority)
     return cat, pp, script, priority
@@ -227,10 +227,7 @@ def convert_filter(text):
     else quote all regex specials, replace '*' by '.*'
     """
     text = text.strip().lower()
-    if text.startswith("re:"):
-        txt = text[3:].strip()
-    else:
-        txt = wildcard_to_re(text)
+    txt = text[3:].strip() if text.startswith("re:") else wildcard_to_re(text)
     try:
         return re.compile(txt, re.I)
     except:
@@ -342,12 +339,12 @@ def convert_version(text):
         version = int(m.group(1)) * 1000000 + int(m.group(2)) * 10000 + int(m.group(3)) * 100
         try:
             if m.group(4).lower() == "rc":
-                version = version + 80
+                version += 80
             elif m.group(4).lower() == "beta":
-                version = version + 40
-            version = version + int(m.group(5))
+                version += 40
+            version += int(m.group(5))
         except:
-            version = version + 99
+            version += 99
             test = False
     return version, test
 
@@ -466,21 +463,20 @@ def from_units(val: str) -> float:
     if val == "-1":
         return float(val)
     m = RE_UNITS.search(val)
-    if m:
-        if m.group(2):
-            val = float(m.group(1))
-            unit = m.group(2)
-            n = 0
-            while unit != TAB_UNITS[n]:
-                val = val * 1024.0
-                n = n + 1
-        else:
-            val = m.group(1)
-        try:
-            return float(val)
-        except:
-            return 0.0
+    if not m:
+        return 0.0
+    if m.group(2):
+        val = float(m.group(1))
+        unit = m.group(2)
+        n = 0
+        while unit != TAB_UNITS[n]:
+            val *= 1024.0
+            n += 1
     else:
+        val = m.group(1)
+    try:
+        return float(val)
+    except:
         return 0.0
 
 
@@ -489,10 +485,7 @@ def to_units(val: Union[int, float], postfix="") -> str:
     Show single decimal for M and higher
     """
     dec_limit = 1
-    if val < 0:
-        sign = "-"
-    else:
-        sign = ""
+    sign = "-" if val < 0 else ""
     val = str(abs(val)).strip()
 
     n = 0
@@ -501,14 +494,10 @@ def to_units(val: Union[int, float], postfix="") -> str:
     except:
         return ""
     while (val > 1023.0) and (n < 5):
-        val = val / 1024.0
-        n = n + 1
+        val /= 1024.0
+        n += 1
     unit = TAB_UNITS[n]
-    if n > dec_limit:
-        decimals = 1
-    else:
-        decimals = 0
-
+    decimals = 1 if n > dec_limit else 0
     fmt = "%%s%%.%sf %%s%%s" % decimals
     return fmt % (sign, val, unit, postfix)
 
@@ -861,7 +850,7 @@ def ip_in_subnet(ip: str, subnet: str) -> bool:
             # IPv6 address; try converting from the older local_ranges settings style.
 
             # Take the IP version of the subnet into account
-            IP_LEN, IP_BITS, IP_SEP = (8, 16, ":") if subnet.find(":") >= 0 else (4, 8, ".")
+            IP_LEN, IP_BITS, IP_SEP = (8, 16, ":") if ":" in subnet else (4, 8, ".")
 
             subnet = subnet.rstrip(IP_SEP).split(IP_SEP)
             prefix = IP_BITS * len(subnet)
@@ -914,12 +903,12 @@ def is_lan_addr(ip: str) -> bool:
     try:
         ip = strip_ipv4_mapped_notation(ip)
         return (
-            # The ipaddress module considers these private, see https://bugs.python.org/issue38655
-            not ip in ("0.0.0.0", "255.255.255.255")
-            and not ip_in_subnet(ip, "::/128")  # Also catch (partially) exploded forms of "::"
+            ip not in ("0.0.0.0", "255.255.255.255")
+            and not ip_in_subnet(ip, "::/128")
             and ipaddress.ip_address(ip).is_private
             and not is_loopback_addr(ip)
         )
+
     except ValueError:
         return False
 
@@ -947,7 +936,7 @@ def ip_extract() -> List[str]:
         output = run_command(program)
         for line in output.split("\n"):
             m = RE_IP4.search(line)
-            if not (m and m.group(2)):
+            if not m or not m.group(2):
                 m = RE_IP6.search(line)
             if m and m.group(2):
                 ips.append(m.group(2))
@@ -995,14 +984,13 @@ def get_base_url(url: str) -> str:
     But also api.althub.co.za -> althub.co.za
     """
     url_host = urllib.parse.urlparse(url).hostname
-    if url_host:
-        url_split = url_host.split(".")
-        # Exception for localhost and IPv6 addresses
-        if len(url_split) < 3:
-            return url_host
-        return ".".join(len(url_split[-2]) < 4 and url_split[-3:] or url_split[-2:])
-    else:
+    if not url_host:
         return ""
+    url_split = url_host.split(".")
+    # Exception for localhost and IPv6 addresses
+    if len(url_split) < 3:
+        return url_host
+    return ".".join(len(url_split[-2]) < 4 and url_split[-3:] or url_split[-2:])
 
 
 def match_str(text: AnyStr, matches: Tuple[AnyStr, ...]) -> Optional[AnyStr]:
@@ -1019,13 +1007,10 @@ def nntp_to_msg(text: Union[List[AnyStr], str]) -> str:
     if isinstance(text, list):
         text = text[0]
 
-    # Only need to split if it was raw data
-    # Sometimes (failed login) we put our own texts
     if not isinstance(text, bytes):
         return text
-    else:
-        lines = text.split(b"\r\n")
-        return ubtou(lines[0])
+    lines = text.split(b"\r\n")
+    return ubtou(lines[0])
 
 
 def list2cmdline(lst: List[str]) -> str:
@@ -1059,7 +1044,7 @@ def build_and_run_command(command: List[str], flatten_command=False, **kwargs):
                     raise IOError
                 elif script_file.read(2) != "#!":
                     # No shebang (#!) defined, add default python
-                    command.insert(0, sys.executable if sys.executable else "python")
+                    command.insert(0, sys.executable or "python")
 
         if sabnzbd.newsunpack.IONICE_COMMAND and cfg.ionice():
             ionice = cfg.ionice().split()

@@ -394,10 +394,8 @@ def file_join(nzo: NzbObject, workdir, workdir_complete, delete, joinables):
 
     try:
         # Handle each set
-        for joinable_set in joinable_sets:
-            current = joinable_sets[joinable_set]
-            joinable_sets[joinable_set].sort()
-
+        for joinable_set, current in joinable_sets.items():
+            current.sort()
             # If par2 already did the work, just remove the files
             if os.path.exists(joinable_set):
                 logging.debug("file_join(): Skipping %s, (probably) joined by par2", joinable_set)
@@ -618,11 +616,7 @@ def rar_extract_core(rarfile_path, numrars, one_folder, nzo: NzbObject, setname,
 
     logging.debug("rar_extract(): Extractionpath: %s", extraction_path)
 
-    if password:
-        password_command = "-p%s" % password
-    else:
-        password_command = "-p-"
-
+    password_command = "-p%s" % password if password else "-p-"
     ############################################################################
 
     if one_folder or cfg.flat_unpack():
@@ -943,8 +937,7 @@ def unseven(nzo: NzbObject, workdir, workdir_complete, delete, one_folder, seven
             sets[name].append(ext)
 
     # Unpack each set
-    for seven in sets:
-        extensions = sets[seven]
+    for seven, extensions in sets.items():
         logging.info("Starting extract on 7zip set/file: %s ", seven)
         nzo.set_action_line(T("Unpacking"), "%s" % setname_from_path(seven))
 
@@ -1005,23 +998,13 @@ def seven_extract_core(sevenset, extensions, extraction_path, one_folder, delete
     """Unpack single 7Z set 'sevenset' to 'extraction_path'
     Return fail==0(ok)/fail==1(error)/fail==2(wrong password), new_files, message
     """
-    if one_folder:
-        method = "e"  # Unpack without folders
-    else:
-        method = "x"  # Unpack with folders
+    method = "e" if one_folder else "x"
     if sabnzbd.WIN32 or sabnzbd.DARWIN:
         case = "-ssc-"  # Case insensitive
     else:
         case = "-ssc"  # Case sensitive
-    if cfg.overwrite_files():
-        overwrite = "-aoa"
-    else:
-        overwrite = "-aou"
-    if password:
-        password = "-p%s" % password
-    else:
-        password = "-p"
-
+    overwrite = "-aoa" if cfg.overwrite_files() else "-aou"
+    password = "-p%s" % password if password else "-p"
     if len(extensions) > 0:
         name = "%s.001" % sevenset
         parm = "-tsplit"
@@ -1161,13 +1144,15 @@ def par2_repair(parfile_nzf: NzbFile, nzo: NzbObject, workdir, setname, single):
 
     try:
         if cfg.enable_par_cleanup():
-            deletables = []
             new_dir_content = os.listdir(workdir)
 
-            # Remove extra files created during repair and par2 base files
-            for path in new_dir_content:
-                if os.path.splitext(path)[1] == ".1" and path not in old_dir_content:
-                    deletables.append(os.path.join(workdir, path))
+            deletables = [
+                os.path.join(workdir, path)
+                for path in new_dir_content
+                if os.path.splitext(path)[1] == ".1"
+                and path not in old_dir_content
+            ]
+
             deletables.append(os.path.join(workdir, setname + ".par2"))
             deletables.append(os.path.join(workdir, setname + ".PAR2"))
             deletables.append(parfile)
@@ -1321,10 +1306,11 @@ def PAR_Verify(parfile, nzo: NzbObject, setname, joinables, single=False):
             logging.info("Extra pars = %s", nzo.extrapars[setname])
 
             # Look for the smallest par2file
-            block_table = {}
-            for nzf in nzo.extrapars[setname]:
-                if not nzf.completed:
-                    block_table[nzf.blocks] = nzf
+            block_table = {
+                nzf.blocks: nzf
+                for nzf in nzo.extrapars[setname]
+                if not nzf.completed
+            }
 
             if block_table:
                 nzf = block_table[min(block_table)]
@@ -1428,7 +1414,6 @@ def PAR_Verify(parfile, nzo: NzbObject, setname, joinables, single=False):
             nzo.set_unpack_info("Repair", msg, setname)
             nzo.status = Status.FAILED
 
-        # File: "oldname.rar" - is a match for "newname.rar".
         elif "is a match for" in line:
             m = _RE_IS_MATCH_FOR.search(line)
             if m:
@@ -1464,9 +1449,6 @@ def PAR_Verify(parfile, nzo: NzbObject, setname, joinables, single=False):
             if line.startswith("Verifying source files"):
                 nzo.set_action_line(T("Verifying"), "01/%02d" % verifytotal)
                 nzo.status = Status.VERIFYING
-
-            elif line.startswith("Scanning:"):
-                pass
 
             # Target files
             m = TARGET_RE.match(line)
@@ -1613,10 +1595,11 @@ def MultiPar_Verify(parfile, nzo: NzbObject, setname, joinables, single=False):
             logging.info("Extra pars = %s", nzo.extrapars[setname])
 
             # Look for the smallest par2file
-            block_table = {}
-            for nzf in nzo.extrapars[setname]:
-                if not nzf.completed:
-                    block_table[nzf.blocks] = nzf
+            block_table = {
+                nzf.blocks: nzf
+                for nzf in nzo.extrapars[setname]
+                if not nzf.completed
+            }
 
             if block_table:
                 nzf = block_table[min(block_table)]
@@ -1637,7 +1620,6 @@ def MultiPar_Verify(parfile, nzo: NzbObject, setname, joinables, single=False):
             nzo.set_unpack_info("Repair", msg, setname)
             nzo.status = Status.FAILED
 
-        # ----------------- Start check/verify stage
         elif line.startswith("Recovery Set ID"):
             # Remove files were MultiPar stores verification result when repaired succesfull
             recovery_id = line.split()[-1]
@@ -1648,8 +1630,6 @@ def MultiPar_Verify(parfile, nzo: NzbObject, setname, joinables, single=False):
             # How many files will it try to find?
             verifytotal = int(line.split()[-1])
 
-        # ----------------- Misnamed-detection stage
-        # Misnamed files
         elif line.startswith("Searching misnamed file"):
             # We are in the misnamed files block
             misnamed_files = True
@@ -1672,8 +1652,6 @@ def MultiPar_Verify(parfile, nzo: NzbObject, setname, joinables, single=False):
                 datafiles.append(new_name)
                 reconstructed.append(old_name)
 
-        # ----------------- Checking stage
-        # Checking input files
         elif line.startswith("Complete file count"):
             in_check = False
             verifynum = 0
@@ -1690,15 +1668,12 @@ def MultiPar_Verify(parfile, nzo: NzbObject, setname, joinables, single=False):
                 nzo.set_action_line(T("Checking"), "%02d/%02d" % (verifynum, verifytotal))
                 old_name = m.group(1)
 
-        # ----------------- Verify stage
-        # Which files need extra verification?
         elif line.startswith("Damaged file count"):
             verifytotal = int(line.split()[-1])
 
         elif line.startswith("Missing file count"):
             verifytotal += int(line.split()[-1])
 
-        # Actual verification
         elif line.startswith("Input File Slice found"):
             # End of verification AND end of misnamed file search
             in_verify = False
@@ -1780,7 +1755,6 @@ def MultiPar_Verify(parfile, nzo: NzbObject, setname, joinables, single=False):
             # But the Need-more-blocks message is always last, so force failure
             finished = 0
 
-        # Result of verification
         elif line.startswith("All Files Complete") or line.endswith("PAR File(s) Incomplete"):
             # Completed without damage!
             # 'PAR File(s) Incomplete' is reported for success
@@ -1806,7 +1780,6 @@ def MultiPar_Verify(parfile, nzo: NzbObject, setname, joinables, single=False):
                 # do the joining. So we can't remove those files!
                 used_joinables = []
 
-        # ----------------- Repair stage
         elif "Recovering slice" in line:
             # Before this it will calculate matrix, here is where it starts
             start = time.time()
@@ -1980,14 +1953,12 @@ def rar_sort(a, b):
     aext = a.split(".")[-1]
     bext = b.split(".")[-1]
 
-    if aext == "rar" and bext == "rar":
+    if aext == "rar" and bext == "rar" or aext != "rar" and bext != "rar":
         return cmp(a, b)
     elif aext == "rar":
         return -1
-    elif bext == "rar":
-        return 1
     else:
-        return cmp(a, b)
+        return 1
 
 
 def quick_check_set(set, nzo):

@@ -57,10 +57,7 @@ RE_VAL = re.compile(r"[^@ ]+@[^.@ ]+\.[^.@ ]")
 def validate_email(value):
     global email_endjob, email_full, email_rss
     if email_endjob() or email_full() or email_rss():
-        if isinstance(value, list):
-            values = value
-        else:
-            values = [value]
+        values = value if isinstance(value, list) else [value]
         for addr in values:
             if not (addr and RE_VAL.match(addr)):
                 return T("%s is not a valid email address") % addr, None

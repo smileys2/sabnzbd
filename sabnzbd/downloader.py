@@ -424,10 +424,7 @@ class Downloader(Thread):
                     logging.warning_helpful(T("You must set a maximum bandwidth before you can set a bandwidth limit"))
             else:
                 self.bandwidth_limit = from_units(value)
-                if mx:
-                    self.bandwidth_perc = self.bandwidth_limit / mx * 100
-                else:
-                    self.bandwidth_perc = 100
+                self.bandwidth_perc = self.bandwidth_limit / mx * 100 if mx else 100
         else:
             self.speed_set()
         logging.info("Speed limit set to %s B/s", self.bandwidth_limit)
@@ -453,22 +450,19 @@ class Downloader(Thread):
         logging.debug("Sleep time: %f seconds", self.sleep_time)
 
     def is_paused(self):
-        if not self.paused:
-            return False
-        else:
-            if sabnzbd.NzbQueue.has_forced_items():
-                return False
-            else:
-                return True
+        return bool(
+            (not self.paused or not sabnzbd.NzbQueue.has_forced_items())
+            and self.paused
+        )
 
     def highest_server(self, me: Server):
         """Return True when this server has the highest priority of the active ones
         0 is the highest priority
         """
-        for server in self.servers:
-            if server is not me and server.active and server.priority < me.priority:
-                return False
-        return True
+        return not any(
+            server is not me and server.active and server.priority < me.priority
+            for server in self.servers
+        )
 
     def nzo_servers(self, nzo):
         return list(filter(nzo.server_in_try_list, self.servers))
@@ -575,12 +569,14 @@ class Downloader(Thread):
                 if server.next_busy_threads_check < now:
                     server.next_busy_threads_check = now + _SERVER_CHECK_DELAY
                     for nw in server.busy_threads[:]:
-                        if (nw.nntp and nw.nntp.error_msg) or (nw.timeout and now > nw.timeout):
-                            if nw.nntp and nw.nntp.error_msg:
-                                # Already showed error
-                                self.__reset_nw(nw)
-                            else:
-                                self.__reset_nw(nw, "timed out", warn=True)
+                        if (nw.nntp and nw.nntp.error_msg):
+                            # Already showed error
+                            self.__reset_nw(nw)
+                            server.bad_cons += 1
+                            self.maybe_block_server(server)
+
+                        elif (nw.timeout and now > nw.timeout):
+                            self.__reset_nw(nw, "timed out", warn=True)
                             server.bad_cons += 1
                             self.maybe_block_server(server)
 
@@ -680,10 +676,10 @@ class Downloader(Thread):
                 # Make sure we update the stats
                 BPSMeter.update()
 
-                # Exit-point
-                if self.shutdown:
-                    logging.info("Shutting down")
-                    break
+            # Exit-point
+            if self.shutdown:
+                logging.info("Shutting down")
+                break
 
             # Use select to find sockets ready for reading/writing
             readkeys = self.read_fds.keys()
@@ -696,24 +692,25 @@ class Downloader(Thread):
                         time.sleep(self.sleep_time)
 
                     # Initialize by waiting for stable speed and then enable sleep
-                    if can_be_slowed is None or can_be_slowed_timer:
-                        # Wait for stable speed to start testing
+                    if (
+                        (can_be_slowed is None or can_be_slowed_timer)
+                        and not can_be_slowed_timer
+                        and now > next_stable_speed_check
+                    ):
+                        if BPSMeter.get_stable_speed(timespan=10):
+                            can_be_slowed_timer = now + 8
+                            can_be_slowed = 1
+                        else:
+                            next_stable_speed_check = now + _BPSMETER_UPDATE_DELAY
 
-                        if not can_be_slowed_timer and now > next_stable_speed_check:
-                            if BPSMeter.get_stable_speed(timespan=10):
-                                can_be_slowed_timer = now + 8
-                                can_be_slowed = 1
-                            else:
-                                next_stable_speed_check = now + _BPSMETER_UPDATE_DELAY
-
-                        # Check 10 seconds after enabling slowdown
-                        if can_be_slowed_timer and now > can_be_slowed_timer:
-                            # Now let's check if it was stable in the last 10 seconds
-                            can_be_slowed = BPSMeter.get_stable_speed(timespan=10)
-                            can_be_slowed_timer = 0
-                            if not can_be_slowed:
-                                self.sleep_time = 0
-                            logging.debug("Downloader-slowdown: %r", can_be_slowed)
+                    # Check 10 seconds after enabling slowdown
+                    if can_be_slowed_timer and now > can_be_slowed_timer:
+                        # Now let's check if it was stable in the last 10 seconds
+                        can_be_slowed = BPSMeter.get_stable_speed(timespan=10)
+                        can_be_slowed_timer = 0
+                        if not can_be_slowed:
+                            self.sleep_time = 0
+                        logging.debug("Downloader-slowdown: %r", can_be_slowed)
 
             else:
                 read = []
@@ -764,12 +761,15 @@ class Downloader(Thread):
 
                     BPSMeter.update(server.id, bytes_received)
 
-                    if self.bandwidth_limit:
-                        if BPSMeter.bps + BPSMeter.sum_cached_amount > self.bandwidth_limit:
+                    if (
+                        self.bandwidth_limit
+                        and BPSMeter.bps + BPSMeter.sum_cached_amount
+                        > self.bandwidth_limit
+                    ):
+                        BPSMeter.update()
+                        while BPSMeter.bps > self.bandwidth_limit:
+                            time.sleep(0.01)
                             BPSMeter.update()
-                            while BPSMeter.bps > self.bandwidth_limit:
-                                time.sleep(0.01)
-                                BPSMeter.update()
 
                 if nw.status_code != 222 and not done:
                     if not nw.connected or nw.status_code == 480:

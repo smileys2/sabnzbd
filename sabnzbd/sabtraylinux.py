@@ -66,10 +66,7 @@ class StatusIcon(Thread):
             logging.debug("language file not loaded, waiting")
 
         self.sabpaused = False
-        if HAVE_XAPP:
-            self.statusicon = XApp.StatusIcon()
-        else:
-            self.statusicon = Gtk.StatusIcon()
+        self.statusicon = XApp.StatusIcon() if HAVE_XAPP else Gtk.StatusIcon()
         self.statusicon.set_name("SABnzbd")
         self.statusicon.set_visible(True)
         self.icon = self.sabicons["default"]

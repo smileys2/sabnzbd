@@ -317,10 +317,9 @@ class BPSMeter:
         # Quota check
         if self.have_quota and self.quota_enabled:
             self.left -= self.sum_cached_amount
-            if self.left <= 0.0:
-                if not sabnzbd.Downloader.paused:
-                    sabnzbd.Downloader.pause()
-                    logging.warning(T("Quota spent, pausing downloading"))
+            if self.left <= 0.0 and not sabnzbd.Downloader.paused:
+                sabnzbd.Downloader.pause()
+                logging.warning(T("Quota spent, pausing downloading"))
 
         # Speedometer
         try:
@@ -382,10 +381,10 @@ class BPSMeter:
     def get_sums(self):
         """return tuple of grand, month, week, day totals"""
         return (
-            sum([v for v in self.grand_total.values()]),
-            sum([v for v in self.month_total.values()]),
-            sum([v for v in self.week_total.values()]),
-            sum([v for v in self.day_total.values()]),
+            sum(list(self.grand_total.values())),
+            sum(list(self.month_total.values())),
+            sum(list(self.week_total.values())),
+            sum(list(self.day_total.values())),
         )
 
     def amounts(self, server: str):
@@ -443,10 +442,8 @@ class BPSMeter:
 
         # Calculate the variance in the speed
         avg = sum(self.bps_list[-timespan:]) / timespan
-        vari = 0
-        for bps in self.bps_list[-timespan:]:
-            vari += abs(bps - avg)
-        vari = vari / timespan
+        vari = sum(abs(bps - avg) for bps in self.bps_list[-timespan:])
+        vari /= timespan
 
         try:
             # See if the variance is less than 5%
@@ -537,32 +534,31 @@ class BPSMeter:
 
     def get_quota(self):
         """If quota active, return check-function, hour, minute"""
-        if self.have_quota:
-            self.q_period = cfg.quota_period()[0].lower()
-            self.q_day = 1
-            self.q_hour = self.q_minute = 0
-            # Pattern = <day#> <hh:mm>
-            # The <day> and <hh:mm> part can both be optional
-            txt = cfg.quota_day().lower()
-            m = RE_DAY.search(txt)
-            if m:
-                self.q_day = int(m.group(1))
-            m = RE_HHMM.search(txt)
-            if m:
-                self.q_hour = int(m.group(1))
-                self.q_minute = int(m.group(2))
-            if self.q_period == "w":
-                self.q_day = max(1, self.q_day)
-                self.q_day = min(7, self.q_day)
-            elif self.q_period == "m":
-                self.q_day = max(1, self.q_day)
-                self.q_day = min(31, self.q_day)
-            else:
-                self.q_day = 1
-            self.change_quota(allow_resume=False)
-            return quota_handler, self.q_hour, self.q_minute
-        else:
+        if not self.have_quota:
             return None, 0, 0
+        self.q_period = cfg.quota_period()[0].lower()
+        self.q_day = 1
+        self.q_hour = self.q_minute = 0
+        # Pattern = <day#> <hh:mm>
+        # The <day> and <hh:mm> part can both be optional
+        txt = cfg.quota_day().lower()
+        m = RE_DAY.search(txt)
+        if m:
+            self.q_day = int(m.group(1))
+        m = RE_HHMM.search(txt)
+        if m:
+            self.q_hour = int(m.group(1))
+            self.q_minute = int(m.group(2))
+        if self.q_period == "w":
+            self.q_day = max(1, self.q_day)
+            self.q_day = min(7, self.q_day)
+        elif self.q_period == "m":
+            self.q_day = max(1, self.q_day)
+            self.q_day = min(31, self.q_day)
+        else:
+            self.q_day = 1
+        self.change_quota(allow_resume=False)
+        return quota_handler, self.q_hour, self.q_minute
 
     def set_status(self, status: bool, action: bool = True):
         """Disable/enable quota management"""

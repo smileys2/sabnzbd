@@ -72,7 +72,7 @@ class Decoder:
 
         # Initialize decoders
         self.decoder_workers = []
-        for i in range(cfg.num_decoders()):
+        for _ in range(cfg.num_decoders()):
             self.decoder_workers.append(DecoderWorker(self.decoder_queue))
 
     def start(self):
@@ -80,11 +80,9 @@ class Decoder:
             decoder_worker.start()
 
     def is_alive(self) -> bool:
-        # Check all workers
-        for decoder_worker in self.decoder_workers:
-            if not decoder_worker.is_alive():
-                return False
-        return True
+        return all(
+            decoder_worker.is_alive() for decoder_worker in self.decoder_workers
+        )
 
     def stop(self):
         # Put multiple to stop all decoders

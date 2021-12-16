@@ -76,81 +76,79 @@ def send_email(message, email_to, test=None):
     # Prepare the email
     email_message = _prepare_message(message)
 
-    if email_server and email_to and email_from:
-        server, port = split_host(email_server)
-        if not port:
-            port = 25
-        logging.debug("Connecting to server %s:%s", server, port)
+    if not email_server or not email_to or not email_from:
+        return T("Cannot send, missing required data")
+    server, port = split_host(email_server)
+    if not port:
+        port = 25
+    logging.debug("Connecting to server %s:%s", server, port)
+
+    try:
+        mailconn = smtplib.SMTP_SSL(server, port)
+        mailconn.ehlo()
+        logging.debug("Connected to server %s:%s", server, port)
+    except:
+        # Non SSL mail server
+        logging.debug("Non-SSL mail server detected reconnecting to server %s:%s", server, port)
 
         try:
-            mailconn = smtplib.SMTP_SSL(server, port)
+            mailconn = smtplib.SMTP(server, port)
             mailconn.ehlo()
-            logging.debug("Connected to server %s:%s", server, port)
         except:
-            # Non SSL mail server
-            logging.debug("Non-SSL mail server detected reconnecting to server %s:%s", server, port)
+            logging.info("Traceback: ", exc_info=True)
+            return errormsg(T("Failed to connect to mail server"))
 
+    # TLS support
+    if mailconn.ehlo_resp:
+        m = re.search(b"STARTTLS", mailconn.ehlo_resp, re.IGNORECASE)
+        if m:
+            logging.debug("TLS mail server detected")
             try:
-                mailconn = smtplib.SMTP(server, port)
+                mailconn.starttls()
                 mailconn.ehlo()
             except:
                 logging.info("Traceback: ", exc_info=True)
-                return errormsg(T("Failed to connect to mail server"))
+                return errormsg(T("Failed to initiate TLS connection"))
 
-        # TLS support
-        if mailconn.ehlo_resp:
-            m = re.search(b"STARTTLS", mailconn.ehlo_resp, re.IGNORECASE)
-            if m:
-                logging.debug("TLS mail server detected")
-                try:
-                    mailconn.starttls()
-                    mailconn.ehlo()
-                except:
-                    logging.info("Traceback: ", exc_info=True)
-                    return errormsg(T("Failed to initiate TLS connection"))
-
-        # Authentication
-        if (email_account != "") and (email_pwd != ""):
-            try:
-                mailconn.login(email_account, email_pwd)
-            except smtplib.SMTPHeloError:
-                return errormsg(T("The server didn't reply properly to the helo greeting"))
-            except smtplib.SMTPAuthenticationError:
-                return errormsg(T("Failed to authenticate to mail server"))
-            except smtplib.SMTPException:
-                return errormsg(T("No suitable authentication method was found"))
-            except:
-                logging.info("Traceback: ", exc_info=True)
-                return errormsg(T("Unknown authentication failure in mail server"))
-
+    # Authentication
+    if (email_account != "") and (email_pwd != ""):
         try:
-            mailconn.sendmail(email_from, email_to, email_message)
-            msg = None
+            mailconn.login(email_account, email_pwd)
         except smtplib.SMTPHeloError:
-            msg = errormsg("The server didn't reply properly to the helo greeting.")
-        except smtplib.SMTPRecipientsRefused:
-            msg = errormsg("The server rejected ALL recipients (no mail was sent).")
-        except smtplib.SMTPSenderRefused:
-            msg = errormsg("The server didn't accept the from_addr.")
-        except smtplib.SMTPDataError:
-            msg = errormsg("The server replied with an unexpected error code (other than a refusal of a recipient).")
+            return errormsg(T("The server didn't reply properly to the helo greeting"))
+        except smtplib.SMTPAuthenticationError:
+            return errormsg(T("Failed to authenticate to mail server"))
+        except smtplib.SMTPException:
+            return errormsg(T("No suitable authentication method was found"))
         except:
             logging.info("Traceback: ", exc_info=True)
-            msg = errormsg(T("Failed to send e-mail"))
+            return errormsg(T("Unknown authentication failure in mail server"))
 
-        try:
-            mailconn.close()
-        except:
-            logging.info("Traceback: ", exc_info=True)
-            errormsg(T("Failed to close mail connection"))
+    try:
+        mailconn.sendmail(email_from, email_to, email_message)
+        msg = None
+    except smtplib.SMTPHeloError:
+        msg = errormsg("The server didn't reply properly to the helo greeting.")
+    except smtplib.SMTPRecipientsRefused:
+        msg = errormsg("The server rejected ALL recipients (no mail was sent).")
+    except smtplib.SMTPSenderRefused:
+        msg = errormsg("The server didn't accept the from_addr.")
+    except smtplib.SMTPDataError:
+        msg = errormsg("The server replied with an unexpected error code (other than a refusal of a recipient).")
+    except:
+        logging.info("Traceback: ", exc_info=True)
+        msg = errormsg(T("Failed to send e-mail"))
 
-        if msg:
-            return msg
-        else:
-            logging.info("Notification e-mail successfully sent")
-            return T("Email succeeded")
-    else:
-        return T("Cannot send, missing required data")
+    try:
+        mailconn.close()
+    except:
+        logging.info("Traceback: ", exc_info=True)
+        errormsg(T("Failed to close mail connection"))
+
+    if msg:
+        return msg
+    logging.info("Notification e-mail successfully sent")
+    return T("Email succeeded")
 
 
 def send_with_template(prefix, parm, test=None):
@@ -177,11 +175,7 @@ def send_with_template(prefix, parm, test=None):
     for template_file in email_templates:
         logging.debug("Trying to send email using template %s", template_file)
         if os.access(template_file, os.R_OK):
-            if test:
-                recipients = [test.get("email_to")]
-            else:
-                recipients = cfg.email_to()
-
+            recipients = [test.get("email_to")] if test else cfg.email_to()
             if len(recipients):
                 for recipient in recipients:
                     # Force-open as UTF-8, otherwise Cheetah breaks it
@@ -225,17 +219,19 @@ def endjob(
                 lines.append(line)
         xstages[tr("stage-" + stage.lower())] = lines
 
-    parm = {}
-    parm["status"] = status
-    parm["name"] = filename
-    parm["path"] = path
-    parm["msgid"] = ""
-    parm["stages"] = xstages
-    parm["script"] = script
-    parm["script_output"] = script_output
-    parm["script_ret"] = script_ret
-    parm["cat"] = cat
-    parm["size"] = "%sB" % to_units(bytes_downloaded)
+    parm = {
+        'status': status,
+        'name': filename,
+        'path': path,
+        'msgid': '',
+        'stages': xstages,
+        'script': script,
+        'script_output': script_output,
+        'script_ret': script_ret,
+        'cat': cat,
+        'size': "%sB" % to_units(bytes_downloaded),
+    }
+
     parm["end_time"] = time.strftime(time_format("%Y-%m-%d %H:%M:%S"), time.localtime(time.time()))
 
     return send_with_template("email", parm, test)
