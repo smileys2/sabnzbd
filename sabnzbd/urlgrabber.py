@@ -305,13 +305,7 @@ class URLGrabber(Thread):
             nzo.filename = url
             nzo.final_name = url.strip()
 
-        if content:
-            # Bad content
-            msg = T("Unusable NZB file")
-        else:
-            # Failed fetch
-            msg = T("URL Fetching failed; %s") % msg
-
+        msg = T("Unusable NZB file") if content else T("URL Fetching failed; %s") % msg
         # Mark as failed
         nzo.set_unpack_info("Source", msg)
         nzo.fail_msg = msg
@@ -358,11 +352,7 @@ def _analyse(fetch_request: HTTPResponse, future_nzo: NzbObject):
     """
     data = None
     if not fetch_request or fetch_request.getcode() != 200:
-        if fetch_request:
-            msg = fetch_request.msg
-        else:
-            msg = ""
-
+        msg = fetch_request.msg if fetch_request else ""
         # Increasing wait-time in steps for standard errors
         when = DEF_TIMEOUT * (future_nzo.url_tries + 1)
         logging.debug("No usable response from indexer, retry after %s sec", when)
@@ -387,5 +377,5 @@ def filename_from_content_disposition(content_disposition: str) -> Optional[str]
     if filename:
         # Basic sanitation
         filename = os.path.basename(filename).lstrip(".").strip()
-        if filename:
-            return filename
+    if filename:
+        return filename

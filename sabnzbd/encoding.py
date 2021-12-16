@@ -46,13 +46,12 @@ def platform_btou(str_in: AnyStr) -> str:
     NOTE: Used for POpen because universal_newlines/text parameter doesn't
     always work! We cannot use encoding-parameter because it's Python 3.7+
     """
-    if isinstance(str_in, bytes):
-        try:
-            return ubtou(str_in)
-        except UnicodeDecodeError:
-            return str_in.decode(CODEPAGE, errors="replace").replace("?", "!")
-    else:
+    if not isinstance(str_in, bytes):
         return str_in
+    try:
+        return ubtou(str_in)
+    except UnicodeDecodeError:
+        return str_in.decode(CODEPAGE, errors="replace").replace("?", "!")
 
 
 def correct_unknown_encoding(str_or_bytes_in: AnyStr) -> str:

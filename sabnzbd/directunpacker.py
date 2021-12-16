@@ -86,25 +86,21 @@ class DirectUnpacker(threading.Thread):
                 self.active_instance.wait(timeout=2)
         except:
             logging.debug("Exception in reset_active()", exc_info=True)
-            pass
-
         self.active_instance = None
         self.cur_setname = None
         self.cur_volume = 0
         self.rarfile_nzf = None
 
     def check_requirements(self):
-        if (
-            not cfg.enable_unrar()
-            or not cfg.direct_unpack()
-            or self.killed
-            or self.nzo.first_articles
-            or not self.nzo.unpack
-            or self.nzo.bad_articles
-            or sabnzbd.newsunpack.RAR_PROBLEM
-        ):
-            return False
-        return True
+        return bool(
+            cfg.enable_unrar()
+            and cfg.direct_unpack()
+            and not self.killed
+            and not self.nzo.first_articles
+            and self.nzo.unpack
+            and not self.nzo.bad_articles
+            and not sabnzbd.newsunpack.RAR_PROBLEM
+        )
 
     def set_volumes_for_nzo(self):
         """Loop over all files to detect the names"""
@@ -156,7 +152,7 @@ class DirectUnpacker(threading.Thread):
                 # Start the unrar command and the loop
                 self.create_unrar_instance()
                 self.start()
-        elif not any(test_nzf.setname == nzf.setname for test_nzf in self.next_sets):
+        elif all(test_nzf.setname != nzf.setname for test_nzf in self.next_sets):
             # Need to store this for the future, only once per set!
             self.next_sets.append(nzf)
 
@@ -440,72 +436,77 @@ class DirectUnpacker(threading.Thread):
     @synchronized(START_STOP_LOCK)
     def abort(self):
         """Abort running instance and delete generated files"""
-        if not self.killed and self.cur_setname:
-            logging.info("Aborting DirectUnpack for %s", self.cur_setname)
-            self.killed = True
+        if self.killed or not self.cur_setname:
+            return
 
-            # Save reference to the first rarfile
-            rarfile_nzf = self.rarfile_nzf
+        logging.info("Aborting DirectUnpack for %s", self.cur_setname)
+        self.killed = True
 
-            # Abort Unrar
-            if self.active_instance:
-                # First we try to abort gracefully
+        # Save reference to the first rarfile
+        rarfile_nzf = self.rarfile_nzf
+
+        # Abort Unrar
+        if self.active_instance:
+            # First we try to abort gracefully
+            try:
+                self.active_instance.stdin.write(b"Q\n")
+                time.sleep(0.2)
+            except IOError:
+                pass
+
+            # Now force kill and give it a bit of time
+            try:
+                self.active_instance.kill()
+                time.sleep(0.2)
+            except AttributeError:
+                # Already killed by the Quit command
+                pass
+
+        # Wake up the thread
+        with self.next_file_lock:
+            self.next_file_lock.notify()
+
+        # No new sets
+        self.next_sets = []
+        self.success_sets = {}
+
+        # Remove files
+        if self.unpack_dir_info:
+            extraction_path, _, _, one_folder, _ = self.unpack_dir_info
+            # In case of flat-unpack we need to remove the files manually
+            if one_folder:
+                # RarFile can fail for mysterious reasons
                 try:
-                    self.active_instance.stdin.write(b"Q\n")
-                    time.sleep(0.2)
-                except IOError:
-                    pass
+                    rar_contents = RarFile(
+                        os.path.join(self.nzo.download_path, rarfile_nzf.filename), single_file_check=True
+                    ).filelist()
+                    for rm_file in rar_contents:
+                        # Flat-unpack, so remove foldername from RarFile output
+                        f = os.path.join(extraction_path, os.path.basename(rm_file))
+                        remove_file(f)
+                except:
+                    # The user will have to remove it themselves
+                    logging.info(
+                        "Failed to clean Direct Unpack after aborting %s", rarfile_nzf.filename, exc_info=True
+                    )
+            else:
+                # We can just remove the whole path
+                remove_all(extraction_path, recursive=True)
+            # Remove dir-info
+            self.unpack_dir_info = None
 
-                # Now force kill and give it a bit of time
-                try:
-                    self.active_instance.kill()
-                    time.sleep(0.2)
-                except AttributeError:
-                    # Already killed by the Quit command
-                    pass
-
-            # Wake up the thread
-            with self.next_file_lock:
-                self.next_file_lock.notify()
-
-            # No new sets
-            self.next_sets = []
-            self.success_sets = {}
-
-            # Remove files
-            if self.unpack_dir_info:
-                extraction_path, _, _, one_folder, _ = self.unpack_dir_info
-                # In case of flat-unpack we need to remove the files manually
-                if one_folder:
-                    # RarFile can fail for mysterious reasons
-                    try:
-                        rar_contents = RarFile(
-                            os.path.join(self.nzo.download_path, rarfile_nzf.filename), single_file_check=True
-                        ).filelist()
-                        for rm_file in rar_contents:
-                            # Flat-unpack, so remove foldername from RarFile output
-                            f = os.path.join(extraction_path, os.path.basename(rm_file))
-                            remove_file(f)
-                    except:
-                        # The user will have to remove it themselves
-                        logging.info(
-                            "Failed to clean Direct Unpack after aborting %s", rarfile_nzf.filename, exc_info=True
-                        )
-                else:
-                    # We can just remove the whole path
-                    remove_all(extraction_path, recursive=True)
-                # Remove dir-info
-                self.unpack_dir_info = None
-
-            # Reset settings
-            self.reset_active()
+        # Reset settings
+        self.reset_active()
 
     def get_formatted_stats(self):
         """Get percentage or number of rar's done"""
-        if self.cur_setname and self.cur_setname in self.total_volumes:
-            # This won't work on obfuscated posts
-            if self.total_volumes[self.cur_setname] >= self.cur_volume and self.cur_volume:
-                return "%02d/%02d" % (self.cur_volume, self.total_volumes[self.cur_setname])
+        if (
+            self.cur_setname
+            and self.cur_setname in self.total_volumes
+            and self.total_volumes[self.cur_setname] >= self.cur_volume
+            and self.cur_volume
+        ):
+            return "%02d/%02d" % (self.cur_volume, self.total_volumes[self.cur_setname])
         return self.cur_volume
 
 
@@ -518,11 +519,10 @@ def analyze_rar_filename(filename):
         if m.group(4):
             # Special since starts with ".rar", ".r00"
             return m.group(1), int_conv(m.group(4)) + 2
-        return m.group(1), int_conv(m.group(3))
-    else:
-        # Detect if first of "rxx" set
-        if filename.endswith(".rar"):
-            return os.path.splitext(filename)[0], 1
+        else:
+            return m.group(1), int_conv(m.group(3))
+    elif filename.endswith(".rar"):
+        return os.path.splitext(filename)[0], 1
     return None, None
 
 

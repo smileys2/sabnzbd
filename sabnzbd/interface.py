@@ -349,18 +349,21 @@ def check_apikey(kwargs):
             return _MSG_APIKEY_INCORRECT
 
     # No active API-key, check web credentials instead
-    if cfg.username() and cfg.password():
-        if check_login() or (
-            kwargs.get("ma_username") == cfg.username() and kwargs.get("ma_password") == cfg.password()
-        ):
-            pass
-        else:
-            log_warning_and_ip(
-                T(
-                    "Authentication missing, please enter username/password from Config->General into your 3rd party program:"
-                )
+    if (
+        cfg.username()
+        and cfg.password()
+        and not check_login()
+        and (
+            kwargs.get("ma_username") != cfg.username()
+            or kwargs.get("ma_password") != cfg.password()
+        )
+    ):
+        log_warning_and_ip(
+            T(
+                "Authentication missing, please enter username/password from Config->General into your 3rd party program:"
             )
-            return _MSG_MISSING_AUTH
+        )
+        return _MSG_MISSING_AUTH
     return None
 
 
@@ -456,11 +459,10 @@ class MainPage:
         """Needed for all skins, URL is fixed due to postproc"""
         # No session key check, due to fixed URLs
         name = kwargs.get("name")
-        if name:
-            history_db = sabnzbd.get_db_connection()
-            return ShowString(history_db.get_name(name), history_db.get_script_log(name))
-        else:
+        if not name:
             raise Raiser(self.__root)
+        history_db = sabnzbd.get_db_connection()
+        return ShowString(history_db.get_name(name), history_db.get_script_log(name))
 
     @secured_expose
     def robots_txt(self, **kwargs):
@@ -471,11 +473,10 @@ class MainPage:
     @secured_expose
     def description_xml(self, **kwargs):
         """Provide the description.xml which was broadcast via SSDP"""
-        if is_lan_addr(cherrypy.request.remote.ip):
-            cherrypy.response.headers["Content-Type"] = "application/xml"
-            return utob(sabnzbd.utils.ssdp.server_ssdp_xml())
-        else:
+        if not is_lan_addr(cherrypy.request.remote.ip):
             return None
+        cherrypy.response.headers["Content-Type"] = "application/xml"
+        return utob(sabnzbd.utils.ssdp.server_ssdp_xml())
 
 
 ##############################################################################
@@ -1084,9 +1085,8 @@ def change_web_dir(web_dir):
 
     if not os.path.exists(web_dir_path):
         return badParameterResponse("Cannot find web template: %s" % web_dir_path)
-    else:
-        cfg.web_dir.set(web_dir)
-        cfg.web_color.set(web_color)
+    cfg.web_dir.set(web_dir)
+    cfg.web_color.set(web_color)
 
 
 ##############################################################################
@@ -1177,10 +1177,7 @@ def unique_svr_name(server):
     svr = 1
     new_name = server
     while svr:
-        if num:
-            new_name = "%s@%d" % (server, num)
-        else:
-            new_name = "%s" % server
+        new_name = "%s@%d" % (server, num) if num else "%s" % server
         svr = config.get_config("servers", new_name)
         num += 1
     return new_name
@@ -1206,10 +1203,7 @@ def handle_server(kwargs, root=None, new_svr=False):
 
     port = kwargs.get("port", "").strip()
     if not port:
-        if not kwargs.get("ssl", "").strip():
-            port = "119"
-        else:
-            port = "563"
+        port = "119" if not kwargs.get("ssl", "").strip() else "563"
         kwargs["port"] = port
 
     if kwargs.get("connections", "").strip() == "":
@@ -1223,10 +1217,8 @@ def handle_server(kwargs, root=None, new_svr=False):
     # Default server name is just the host name
     server = host
 
-    svr = None
     old_server = kwargs.get("server")
-    if old_server:
-        svr = config.get_config("servers", old_server)
+    svr = config.get_config("servers", old_server) if old_server else None
     if svr:
         server = old_server
     else:
@@ -1624,7 +1616,7 @@ class ConfigScheduling:
     @secured_expose(check_configlock=True)
     def index(self, **kwargs):
         def get_days():
-            days = {
+            return {
                 "*": T("Daily"),
                 "1": T("Monday"),
                 "2": T("Tuesday"),
@@ -1634,7 +1626,6 @@ class ConfigScheduling:
                 "6": T("Saturday"),
                 "7": T("Sunday"),
             }
-            return days
 
         conf = build_header(sabnzbd.WEB_DIR_CONFIG)
 
@@ -1843,10 +1834,7 @@ class ConfigCats:
     @secured_expose(check_api_key=True, check_configlock=True)
     def save(self, **kwargs):
         name = kwargs.get("name", "*")
-        if name == "*":
-            newname = name
-        else:
-            newname = re.sub('"', "", kwargs.get("newname", ""))
+        newname = name if name == "*" else re.sub('"', "", kwargs.get("newname", ""))
         if newname:
             # Check if this cat-dir is not sub-folder of incomplete
             if same_file(cfg.download_dir.get_path(), real_path(cfg.complete_dir.get_path(), kwargs["dir"])):
@@ -1986,11 +1974,7 @@ def GetRssLog(feed):
             job["baselink"] = ""
             job["nzbname"] = job["title"]
 
-        if job.get("size", 0):
-            job["size_units"] = to_units(job["size"])
-        else:
-            job["size_units"] = "-"
-
+        job["size_units"] = to_units(job["size"]) if job.get("size", 0) else "-"
         # And we add extra fields for sorting
         if job.get("age", 0):
             job["age_ms"] = (job["age"] - datetime.utcfromtimestamp(0)).total_seconds()

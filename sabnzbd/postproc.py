@@ -456,26 +456,26 @@ def process_job(nzo: NzbObject):
             # Set permissions right
             set_permissions(tmp_workdir_complete)
 
-            if all_ok and marker_file:
-                del_marker(os.path.join(tmp_workdir_complete, marker_file))
-                remove_from_list(marker_file, newfiles)
+        if all_ok and marker_file:
+            del_marker(os.path.join(tmp_workdir_complete, marker_file))
+            remove_from_list(marker_file, newfiles)
 
-            if all_ok:
-                # Remove files matching the cleanup list
-                cleanup_list(tmp_workdir_complete, skip_nzb=True)
+        if all_ok:
+            # Remove files matching the cleanup list
+            cleanup_list(tmp_workdir_complete, skip_nzb=True)
 
-                # Check if this is an NZB-only download, if so redirect to queue
-                # except when PP was Download-only
-                if flag_repair:
-                    nzb_list = nzb_redirect(tmp_workdir_complete, nzo.final_name, nzo.pp, script, nzo.cat, nzo.priority)
-                else:
-                    nzb_list = None
-                if nzb_list:
-                    nzo.set_unpack_info("Download", T("Sent %s to queue") % nzb_list)
-                    cleanup_empty_directories(tmp_workdir_complete)
-                else:
-                    # Full cleanup including nzb's
-                    cleanup_list(tmp_workdir_complete, skip_nzb=False)
+            # Check if this is an NZB-only download, if so redirect to queue
+            # except when PP was Download-only
+            if flag_repair:
+                nzb_list = nzb_redirect(tmp_workdir_complete, nzo.final_name, nzo.pp, script, nzo.cat, nzo.priority)
+            else:
+                nzb_list = None
+            if nzb_list:
+                nzo.set_unpack_info("Download", T("Sent %s to queue") % nzb_list)
+                cleanup_empty_directories(tmp_workdir_complete)
+            else:
+                # Full cleanup including nzb's
+                cleanup_list(tmp_workdir_complete, skip_nzb=False)
 
         script_output = ""
         script_ret = 0
@@ -509,72 +509,77 @@ def process_job(nzo: NzbObject):
                 remove_samples(workdir_complete)
 
             # TV/Movie/Date Renaming code part 2 - rename and move files to parent folder
-            if all_ok and file_sorter.sorter_active:
-                if newfiles:
-                    workdir_complete, ok = file_sorter.sorter.rename(newfiles, workdir_complete)
-                    if not ok:
-                        nzo.set_unpack_info("Unpack", T("Failed to move files"))
-                        nzo.fail_msg = T("Failed to move files")
-                        all_ok = False
+            if all_ok and file_sorter.sorter_active and newfiles:
+                workdir_complete, ok = file_sorter.sorter.rename(newfiles, workdir_complete)
+                if not ok:
+                    nzo.set_unpack_info("Unpack", T("Failed to move files"))
+                    nzo.fail_msg = T("Failed to move files")
+                    all_ok = False
 
-            # Run further post-processing
-            if (all_ok or not cfg.safe_postproc()) and not nzb_list:
-                # Use par2 files to deobfuscate unpacked file names
-                # Only if we also run cleanup, so not to process the "regular" par2 files
-                if flag_delete and cfg.process_unpacked_par2():
-                    newfiles = deobfuscate.recover_par2_names(newfiles)
+        # Run further post-processing
+        if (all_ok or not cfg.safe_postproc()) and not nzb_list:
+            # Use par2 files to deobfuscate unpacked file names
+            # Only if we also run cleanup, so not to process the "regular" par2 files
+            if flag_delete and cfg.process_unpacked_par2():
+                newfiles = deobfuscate.recover_par2_names(newfiles)
 
-                if cfg.deobfuscate_final_filenames():
-                    # Deobfuscate the filenames
-                    logging.info("Running deobfuscate")
-                    deobfuscate.deobfuscate_list(newfiles, nzo.final_name)
+            if cfg.deobfuscate_final_filenames():
+                # Deobfuscate the filenames
+                logging.info("Running deobfuscate")
+                deobfuscate.deobfuscate_list(newfiles, nzo.final_name)
 
-                # Run the user script
-                script_path = make_script_path(script)
-                if script_path:
-                    # Set the current nzo status to "Ext Script...". Used in History
-                    nzo.status = Status.RUNNING
-                    nzo.set_action_line(T("Running script"), script)
-                    nzo.set_unpack_info("Script", T("Running user script %s") % script, unique=True)
-                    script_log, script_ret = external_processing(
-                        script_path, nzo, clip_path(workdir_complete), nzo.final_name, job_result
-                    )
-                    script_line = get_last_line(script_log)
-                    if script_log:
-                        script_output = nzo.nzo_id
-                    if script_line:
-                        nzo.set_unpack_info("Script", script_line, unique=True)
-                    else:
-                        nzo.set_unpack_info("Script", T("Ran %s") % script, unique=True)
+            # Run the user script
+            script_path = make_script_path(script)
+            if script_path:
+                # Set the current nzo status to "Ext Script...". Used in History
+                nzo.status = Status.RUNNING
+                nzo.set_action_line(T("Running script"), script)
+                nzo.set_unpack_info("Script", T("Running user script %s") % script, unique=True)
+                script_log, script_ret = external_processing(
+                    script_path, nzo, clip_path(workdir_complete), nzo.final_name, job_result
+                )
+                script_line = get_last_line(script_log)
+                if script_log:
+                    script_output = nzo.nzo_id
+                if script_line:
+                    nzo.set_unpack_info("Script", script_line, unique=True)
+                else:
+                    nzo.set_unpack_info("Script", T("Ran %s") % script, unique=True)
 
-                    # Maybe bad script result should fail job
-                    if script_ret and cfg.script_can_fail():
-                        script_error = True
-                        all_ok = False
-                        nzo.fail_msg = T("Script exit code is %s") % script_ret
+                # Maybe bad script result should fail job
+                if script_ret and cfg.script_can_fail():
+                    script_error = True
+                    all_ok = False
+                    nzo.fail_msg = T("Script exit code is %s") % script_ret
 
         # Email the results
-        if not nzb_list and cfg.email_endjob():
-            if cfg.email_endjob() == 1 or (cfg.email_endjob() == 2 and (unpack_error or par_error or script_error)):
-                emailer.endjob(
-                    nzo.final_name,
-                    nzo.cat,
-                    all_ok,
-                    workdir_complete,
-                    nzo.bytes_downloaded,
-                    nzo.fail_msg,
-                    nzo.unpack_info,
-                    script,
-                    script_log,
-                    script_ret,
+        if (
+            not nzb_list
+            and cfg.email_endjob()
+            and (
+                cfg.email_endjob() == 1
+                or (
+                    cfg.email_endjob() == 2
+                    and (unpack_error or par_error or script_error)
                 )
+            )
+        ):
+            emailer.endjob(
+                nzo.final_name,
+                nzo.cat,
+                all_ok,
+                workdir_complete,
+                nzo.bytes_downloaded,
+                nzo.fail_msg,
+                nzo.unpack_info,
+                script,
+                script_log,
+                script_ret,
+            )
 
         if script_output:
             # Can do this only now, otherwise it would show up in the email
-            if script_ret:
-                script_ret = "Exit(%s) " % script_ret
-            else:
-                script_ret = ""
+            script_ret = "Exit(%s) " % script_ret if script_ret else ""
             if len(script_log.rstrip().split("\n")) > 1:
                 nzo.set_unpack_info(
                     "Script",

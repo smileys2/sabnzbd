@@ -102,11 +102,7 @@ class Scheduler:
                 logging.warning(T("Bad schedule %s at %s:%s"), action_name, m, h)
                 continue
 
-            if d.isdigit():
-                d = [int(i) for i in d]
-            else:
-                d = DAILY_RANGE
-
+            d = [int(i) for i in d] if d.isdigit() else DAILY_RANGE
             if action_name == "resume":
                 action = self.scheduled_resume
                 arguments = []
@@ -405,16 +401,15 @@ class Scheduler:
         """Return minutes:seconds until pause ends"""
         if self.pause_end is None:
             return "0"
+        val = self.pause_end - time.time()
+        if val < 0:
+            sign = "-"
+            val = abs(val)
         else:
-            val = self.pause_end - time.time()
-            if val < 0:
-                sign = "-"
-                val = abs(val)
-            else:
-                sign = ""
-            mins = int(val / 60)
-            sec = int(val - mins * 60)
-            return "%s%d:%02d" % (sign, mins, sec)
+            sign = ""
+        mins = int(val / 60)
+        sec = int(val - mins * 60)
+        return "%s%d:%02d" % (sign, mins, sec)
 
     def pause_check(self):
         """Unpause when time left is negative, compensate for missed schedule"""

@@ -5,6 +5,7 @@ Note: extension always contains a leading dot
 """
 
 
+
 import puremagic
 import os
 import sys
@@ -238,7 +239,7 @@ DOWNLOAD_EXT = (
 # Combine to one tuple, with unique entries:
 ALL_EXT = tuple(set(POPULAR_EXT + DOWNLOAD_EXT))
 # Prepend a dot to each extension, because we work with a leading dot in extensions
-ALL_EXT = tuple(["." + i for i in ALL_EXT])
+ALL_EXT = tuple("." + i for i in ALL_EXT)
 
 
 def has_popular_extension(file_path: str) -> bool:
@@ -249,10 +250,7 @@ def has_popular_extension(file_path: str) -> bool:
 
 def all_possible_extensions(file_path: str) -> List[str]:
     """returns a list with all possible extensions (with leading dot) for given file_path as reported by puremagic"""
-    extension_list = []
-    for i in puremagic.magic_file(file_path):
-        extension_list.append(i.extension)
-    return extension_list
+    return [i.extension for i in puremagic.magic_file(file_path)]
 
 
 def what_is_most_likely_extension(file_path: str) -> str:
@@ -298,11 +296,7 @@ if __name__ == "__main__":
 
         file_path = sys.argv[i]
 
-        if privacy:
-            to_be_printed = file_path[-10:]
-        else:
-            to_be_printed = file_path
-
+        to_be_printed = file_path[-10:] if privacy else file_path
         if has_popular_extension(file_path):
             # a common extension, so let's see what puremagic says, so that we can learn
             filename, file_extension = os.path.splitext(file_path)

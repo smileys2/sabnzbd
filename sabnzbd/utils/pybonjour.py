@@ -1824,10 +1824,7 @@ class TXTRecord(object):
 
         parts = []
         for name, value in self:
-            if value is None:
-                item = name
-            else:
-                item = "%s=%s" % (name, value)
+            item = name if value is None else "%s=%s" % (name, value)
             if (not self.strict) and (len(item) > 255):
                 item = item[:255]
             parts.append(chr(len(item)))
@@ -1908,11 +1905,7 @@ class TXTRecord(object):
             # Add the item only if the name is non-empty and there are
             # no existing items with the same name
             if item[0] and (item[0] not in txt):
-                if len(item) == 1:
-                    txt[item[0]] = None
-                else:
-                    txt[item[0]] = item[1]
-
+                txt[item[0]] = None if len(item) == 1 else item[1]
             data = data[length + 1 :]
 
         return txt

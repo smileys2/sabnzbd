@@ -46,11 +46,7 @@ def test_nntp_server_dict(kwargs):
     port = int_conv(kwargs.get("port", 0))
 
     if not port:
-        if ssl:
-            port = 563
-        else:
-            port = 119
-
+        port = 563 if ssl else 119
     return test_nntp_server(
         host,
         port,

@@ -131,7 +131,7 @@ class Rating(Thread):
             indexer_id = self.queue.get()
             try:
                 if indexer_id and not self._send_rating(indexer_id):
-                    for unused in range(0, 60):
+                    for _ in range(60):
                         if self.shutdown:
                             break
                         time.sleep(1)
@@ -147,49 +147,50 @@ class Rating(Thread):
     # The same file may be uploaded multiple times creating a new nzo_id each time
     @synchronized(RATING_LOCK)
     def add_rating(self, indexer_id, nzo_id, fields):
-        if indexer_id and nzo_id:
-            logging.debug(
-                "Add rating (%s, %s: %s, %s, %s, %s)",
-                indexer_id,
-                nzo_id,
-                fields["video"],
-                fields["audio"],
-                fields["voteup"],
-                fields["votedown"],
-            )
-            try:
-                rating = self.ratings.get(indexer_id, NzbRating())
-                if fields["video"] and fields["videocnt"]:
-                    rating.avg_video = int(float(fields["video"]))
-                    rating.avg_video_cnt = int(float(fields["videocnt"]))
-                if fields["audio"] and fields["audiocnt"]:
-                    rating.avg_audio = int(float(fields["audio"]))
-                    rating.avg_audio_cnt = int(float(fields["audiocnt"]))
-                if fields["voteup"]:
-                    rating.avg_vote_up = int(float(fields["voteup"]))
-                if fields["votedown"]:
-                    rating.avg_vote_down = int(float(fields["votedown"]))
-                if fields["spam"]:
-                    rating.avg_spam_cnt = int(float(fields["spam"]))
-                if fields["confirmed-spam"]:
-                    rating.avg_spam_confirm = fields["confirmed-spam"].lower() == "yes"
-                if fields["passworded"]:
-                    rating.avg_encrypted_cnt = int(float(fields["passworded"]))
-                if fields["confirmed-passworded"]:
-                    rating.avg_encrypted_confirm = fields["confirmed-passworded"].lower() == "yes"
-                # Indexers can supply a full URL or just a host
-                if fields["host"]:
-                    rating.host = (
-                        fields["host"][0] if fields["host"] and isinstance(fields["host"], list) else fields["host"]
-                    )
-                if fields["url"]:
-                    rating.host = (
-                        fields["url"][0] if fields["url"] and isinstance(fields["url"], list) else fields["url"]
-                    )
-                self.ratings[indexer_id] = rating
-                self.nzo_indexer_map[nzo_id] = indexer_id
-            except:
-                pass
+        if not indexer_id or not nzo_id:
+            return
+        logging.debug(
+            "Add rating (%s, %s: %s, %s, %s, %s)",
+            indexer_id,
+            nzo_id,
+            fields["video"],
+            fields["audio"],
+            fields["voteup"],
+            fields["votedown"],
+        )
+        try:
+            rating = self.ratings.get(indexer_id, NzbRating())
+            if fields["video"] and fields["videocnt"]:
+                rating.avg_video = int(float(fields["video"]))
+                rating.avg_video_cnt = int(float(fields["videocnt"]))
+            if fields["audio"] and fields["audiocnt"]:
+                rating.avg_audio = int(float(fields["audio"]))
+                rating.avg_audio_cnt = int(float(fields["audiocnt"]))
+            if fields["voteup"]:
+                rating.avg_vote_up = int(float(fields["voteup"]))
+            if fields["votedown"]:
+                rating.avg_vote_down = int(float(fields["votedown"]))
+            if fields["spam"]:
+                rating.avg_spam_cnt = int(float(fields["spam"]))
+            if fields["confirmed-spam"]:
+                rating.avg_spam_confirm = fields["confirmed-spam"].lower() == "yes"
+            if fields["passworded"]:
+                rating.avg_encrypted_cnt = int(float(fields["passworded"]))
+            if fields["confirmed-passworded"]:
+                rating.avg_encrypted_confirm = fields["confirmed-passworded"].lower() == "yes"
+            # Indexers can supply a full URL or just a host
+            if fields["host"]:
+                rating.host = (
+                    fields["host"][0] if fields["host"] and isinstance(fields["host"], list) else fields["host"]
+                )
+            if fields["url"]:
+                rating.host = (
+                    fields["url"][0] if fields["url"] and isinstance(fields["url"], list) else fields["url"]
+                )
+            self.ratings[indexer_id] = rating
+            self.nzo_indexer_map[nzo_id] = indexer_id
+        except:
+            pass
 
     @synchronized(RATING_LOCK)
     def update_user_rating(self, nzo_id, video, audio, vote, flag, flag_detail=None):

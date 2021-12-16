@@ -45,7 +45,7 @@ def get_connection_info(user=True):
     try:
         hive = winreg.ConnectRegistry(None, section)
         key = winreg.OpenKey(hive, keypath + r"\api")
-        for i in range(0, winreg.QueryInfoKey(key)[1]):
+        for i in range(winreg.QueryInfoKey(key)[1]):
             name, value, val_type = winreg.EnumValue(key, i)
             if name == "url":
                 url = value
@@ -105,7 +105,7 @@ def get_install_lng():
     try:
         hive = winreg.ConnectRegistry(None, winreg.HKEY_CURRENT_USER)
         key = winreg.OpenKey(hive, r"Software\SABnzbd")
-        for i in range(0, winreg.QueryInfoKey(key)[1]):
+        for i in range(winreg.QueryInfoKey(key)[1]):
             name, value, val_type = winreg.EnumValue(key, i)
             if name == "Installer Language":
                 lng = value

@@ -114,7 +114,7 @@ class NewsWrapper:
             self.pass_sent = False
             self.pass_ok = False
 
-        if code in (400, 502):
+        if code in {400, 502}:
             raise NNTPPermanentError(nntp_to_msg(self.data))
         elif not self.user_sent:
             command = utob("authinfo user %s\r\n" % self.server.username)
@@ -240,12 +240,7 @@ class NewsWrapper:
         self.__init__(self.server, self.thrdnum)
 
         # Wait before re-using this newswrapper
-        if wait:
-            # Reset due to error condition, use server timeout
-            self.timeout = time.time() + self.server.timeout
-        else:
-            # Reset for internal reasons, just wait 5 sec
-            self.timeout = time.time() + 5
+        self.timeout = time.time() + self.server.timeout if wait else time.time() + 5
 
     def __repr__(self):
         return "<NewsWrapper: server=%s:%s, thread=%s, connected=%s>" % (
@@ -380,16 +375,14 @@ class NNTP:
             if self.nw.blocking:
                 raise error
 
-        # Blocking = server-test, pass directly to display code
         if self.nw.blocking:
             raise socket.error(errno.ECONNREFUSED, str(error))
-        else:
-            msg = "Failed to connect: %s" % (str(error))
-            msg = "%s %s@%s:%s" % (msg, self.nw.thrdnum, self.host, self.nw.server.port)
-            self.error_msg = msg
-            self.nw.server.next_busy_threads_check = 0
-            logging.info(msg)
-            self.nw.server.warning = msg
+        msg = "Failed to connect: %s" % (str(error))
+        msg = "%s %s@%s:%s" % (msg, self.nw.thrdnum, self.host, self.nw.server.port)
+        self.error_msg = msg
+        self.nw.server.next_busy_threads_check = 0
+        logging.info(msg)
+        self.nw.server.warning = msg
 
     def __repr__(self):
         return "<NNTP: %s:%s>" % (self.host, self.nw.server.port)

@@ -84,10 +84,8 @@ class Assembler(Thread):
                         required_space = 0
                         if cfg.direct_unpack():
                             required_space = (complete_free + nzo.bytes_downloaded) / GIGI
-                        else:
-                            # Continue downloading until 95% complete before checking
-                            if nzo.bytes_tried > (nzo.bytes - nzo.bytes_par2) * 0.95:
-                                required_space = (complete_free + nzo.bytes) / GIGI
+                        elif nzo.bytes_tried > (nzo.bytes - nzo.bytes_par2) * 0.95:
+                            required_space = (complete_free + nzo.bytes) / GIGI
 
                         if required_space and freespace["complete_dir"][1] < required_space:
                             full_dir = "complete_dir"
@@ -231,14 +229,11 @@ class Assembler(Thread):
                         article.on_disk = True
                     else:
                         logging.info("No data found when trying to write %s", article)
+                elif file_done:
+                    continue
                 else:
-                    # If the article was not decoded but the file
-                    # is done, it is just a missing piece, so keep writing
-                    if file_done:
-                        continue
-                    else:
-                        # We reach an article that was not decoded
-                        break
+                    # We reach an article that was not decoded
+                    break
 
         # Final steps
         if file_done:
@@ -342,8 +337,6 @@ def check_encrypted_and_unwanted_files(nzo: NzbObject, filepath: str) -> Tuple[b
                                         # We assume this one worked!
                                         password_hit = password
                                         break
-                                    # This one didn't work
-                                    pass
                                 except:
                                     # All the other errors we skip, they might be fixable in post-proc.
                                     # For example starting from the wrong volume, or damaged files

@@ -128,10 +128,10 @@ def is_probably_obfuscated(myinputfilename: str) -> bool:
         return True
 
     # these are signals for the obfuscation versus non-obfuscation
-    decimals = sum(1 for c in filebasename if c.isnumeric())
+    decimals = sum(bool(c.isnumeric()) for c in filebasename)
     upperchars = sum(1 for c in filebasename if c.isupper())
-    lowerchars = sum(1 for c in filebasename if c.islower())
-    spacesdots = sum(1 for c in filebasename if c == " " or c == "." or c == "_")  # space-like symbols
+    lowerchars = sum(bool(c.islower()) for c in filebasename)
+    spacesdots = sum(c in [" ", ".", "_"] for c in filebasename)
 
     # Example: "Great Distro"
     if upperchars >= 2 and lowerchars >= 2 and spacesdots >= 1:

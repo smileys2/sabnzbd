@@ -57,11 +57,7 @@ def get_rar_extension(myrarfile):
                     org_extension = "part%02d.rar" % volumenumber
                 else:
                     # 1, 2, 3, 4 resp refers to .rar, .r00, .r01, .r02 ...
-                    if volumenumber == 1:
-                        org_extension = "rar"
-                    else:
-                        org_extension = "r%02d" % (volumenumber - 2)
-
+                    org_extension = "rar" if volumenumber == 1 else "r%02d" % (volumenumber - 2)
             elif rar_ver.endswith("5"):
                 mybuf = fh.read(100)  # first 100 bytes is enough
 

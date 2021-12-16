@@ -23,9 +23,9 @@ def do_socket_connect(result_queue: queue.Queue, ip: str, port: int, use_ssl: bo
     """Connect to the ip, and put the result into the queue"""
     try:
         # Create socket
-        if ip.find(":") >= 0:
+        if ":" in ip:
             s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-        if ip.find(".") >= 0:
+        if "." in ip:
             time.sleep(ipv4delay)  # IPv4 ... so a delay for IPv4 if we prefer IPv6. Note: ipv4delay could be 0
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 

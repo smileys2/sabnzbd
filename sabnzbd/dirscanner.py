@@ -49,11 +49,7 @@ def clean_file_list(inp_list, folder, files):
     for path in sorted(inp_list):
         fld, name = os.path.split(path)
         if fld == folder:
-            present = False
-            for name in files:
-                if os.path.join(folder, name) == path:
-                    present = True
-                    break
+            present = any(os.path.join(folder, name) == path for name in files)
             if not present:
                 del inp_list[path]
 
@@ -164,7 +160,7 @@ class DirScanner(threading.Thread):
 
                     # Wait until the attributes are stable for 1 second, but give up after 3 sec
                     # This indicates that the file is fully written to disk
-                    for n in range(3):
+                    for _ in range(3):
                         time.sleep(1.0)
                         try:
                             stat_tuple_tmp = os.stat(path)

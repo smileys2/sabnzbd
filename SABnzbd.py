@@ -356,10 +356,7 @@ def check_template_scheme(color, web_dir):
 
 
 def fix_webname(name):
-    if name:
-        xname = name.title()
-    else:
-        xname = ""
+    xname = name.title() if name else ""
     if xname in ("Default",):
         return "Glitter"
     elif xname in ("Glitter",):
@@ -379,12 +376,6 @@ def get_user_profile_paths():
         # just assume that everything defaults to the program dir
         sabnzbd.DIR_LCLDATA = sabnzbd.DIR_PROG
         sabnzbd.DIR_HOME = sabnzbd.DIR_PROG
-        if sabnzbd.WIN32:
-            # Ignore Win32 "logoff" signal
-            # This should work, but it doesn't
-            # Instead the signal_handler will ignore the "logoff" signal
-            # signal.signal(5, signal.SIG_IGN)
-            pass
         return
     elif sabnzbd.WIN32:
         try:
@@ -856,8 +847,7 @@ def get_f_option(opts):
     for opt, arg in opts:
         if opt == "-f":
             return arg
-    else:
-        return None
+    return None
 
 
 def main():

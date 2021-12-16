@@ -169,10 +169,12 @@ def has_win_device(filename: str) -> bool:
     Before and after sanitizing
     """
     filename = os.path.split(filename)[1].lower()
-    for dev in _DEVICES:
-        if filename == dev or filename.startswith(dev + ".") or filename.startswith("_" + dev + "."):
-            return True
-    return False
+    return any(
+        filename == dev
+        or filename.startswith(dev + ".")
+        or filename.startswith("_" + dev + ".")
+        for dev in _DEVICES
+    )
 
 
 CH_ILLEGAL = "/"
@@ -232,9 +234,9 @@ def sanitize_filename(name: str) -> str:
             if len(ext) > maxextlength:
                 # allow first <maxextlength> chars, including the starting dot
                 ext = ext[:maxextlength]
-            if len(name) + len(ext) > DEF_FILE_MAX:
-                # Still too long, limit the basename
-                name = name[: DEF_FILE_MAX - len(ext)]
+        if len(name) + len(ext) > DEF_FILE_MAX:
+            # Still too long, limit the basename
+            name = name[: DEF_FILE_MAX - len(ext)]
 
     lowext = ext.lower()
     if lowext == ".par2" and lowext != ext:
@@ -276,7 +278,7 @@ def sanitize_foldername(name: str) -> str:
 
     # And finally, make sure it doesn't end in a dot or a space
     # This is invalid on Windows and can cause trouble for some other tools
-    if name != "." and name != "..":
+    if name not in [".", ".."]:
         # This would be perfect for := operator in Python 3.8+
         while len(name.strip().rstrip(".")) < len(name):
             name = name.strip().rstrip(".")
@@ -317,17 +319,8 @@ def sanitize_and_trim_path(path: str) -> str:
 def sanitize_files(folder: Optional[str] = None, filelist: Optional[List[str]] = None) -> List[str]:
     """Sanitize each file in the folder or list of filepaths, return list of new names"""
     logging.info("Checking if any resulting filenames need to be sanitized")
-    if folder:
-        filelist = listdir_full(folder)
-    else:
-        filelist = filelist or []
-
-    # Loop over all the files
-    output_filelist = []
-    for old_path in filelist:
-        # Will skip files if there's nothing to sanitize
-        output_filelist.append(renamer(old_path, old_path))
-    return output_filelist
+    filelist = listdir_full(folder) if folder else filelist or []
+    return [renamer(old_path, old_path) for old_path in filelist]
 
 
 def real_path(loc: str, path: str) -> str:
@@ -337,10 +330,7 @@ def real_path(loc: str, path: str) -> str:
     """
     # The Windows part is a bit convoluted because
     # C: and C:\ are 2 different things
-    if path:
-        path = path.strip()
-    else:
-        path = ""
+    path = path.strip() if path else ""
     if path:
         if not sabnzbd.WIN32 and path.startswith("~/"):
             path = path.replace("~", os.environ.get("HOME", sabnzbd.DIR_HOME), 1)
@@ -377,24 +367,22 @@ def create_real_path(
     'writable' means that an existing folder should be writable
     Returns ('success', 'full path', 'error_msg')
     """
-    if path:
-        my_dir = real_path(loc, path)
-        if not os.path.exists(my_dir):
-            logging.info("%s directory: %s does not exist, try to create it", name, my_dir)
-            if not create_all_dirs(my_dir, umask):
-                msg = T("Cannot create directory %s") % clip_path(my_dir)
-                logging.error(msg)
-                return False, my_dir, msg
-
-        checks = (os.W_OK + os.R_OK) if writable else os.R_OK
-        if os.access(my_dir, checks):
-            return True, my_dir, None
-        else:
-            msg = T("%s directory: %s error accessing") % (name, clip_path(my_dir))
+    if not path:
+        return False, path, None
+    my_dir = real_path(loc, path)
+    if not os.path.exists(my_dir):
+        logging.info("%s directory: %s does not exist, try to create it", name, my_dir)
+        if not create_all_dirs(my_dir, umask):
+            msg = T("Cannot create directory %s") % clip_path(my_dir)
             logging.error(msg)
             return False, my_dir, msg
-    else:
-        return False, path, None
+
+    checks = (os.W_OK + os.R_OK) if writable else os.R_OK
+    if os.access(my_dir, checks):
+        return True, my_dir, None
+    msg = T("%s directory: %s error accessing") % (name, clip_path(my_dir))
+    logging.error(msg)
+    return False, my_dir, msg
 
 
 def same_file(a: str, b: str) -> int:
@@ -409,11 +397,7 @@ def same_file(a: str, b: str) -> int:
     a = os.path.normpath(os.path.abspath(a))
     b = os.path.normpath(os.path.abspath(b))
 
-    # If it's the same file, it's also a sub-folder
-    is_subfolder = 0
-    if b.startswith(a):
-        is_subfolder = 2
-
+    is_subfolder = 2 if b.startswith(a) else 0
     try:
         # Only available on Linux
         if os.path.samefile(a, b) is True:
@@ -472,7 +456,7 @@ def check_mount(path: str) -> bool:
         m = re.search(r"^(/(?:mnt|media)/[^/]+)", path)
 
     if m:
-        for n in range(sabnzbd.cfg.wait_ext_drive() or 1):
+        for _ in range(sabnzbd.cfg.wait_ext_drive() or 1):
             if os.path.exists(m.group(1)):
                 return True
             logging.debug("Waiting for %s to come online", m.group(1))
@@ -504,11 +488,7 @@ def build_filelists(
         filelist.extend(listdir_full(workdir, recursive=False))
 
     for file in filelist:
-        # Extra check for rar (takes CPU/disk)
-        file_is_rar = False
-        if check_rar:
-            file_is_rar = rarfile.is_rarfile(file)
-
+        file_is_rar = rarfile.is_rarfile(file) if check_rar else False
         # Run through all the checks
         if SEVENZIP_RE.search(file) or SEVENMULTI_RE.search(file):
             # 7zip
@@ -588,17 +568,23 @@ def list_scripts(default: bool = False, none: bool = True) -> List[str]:
     path = sabnzbd.cfg.script_dir.get_path()
     if path and os.access(path, os.R_OK):
         for script in globber_full(path):
-            if os.path.isfile(script):
-                if (
+            if os.path.isfile(script) and (
+                (
                     (
                         sabnzbd.WIN32
                         and os.path.splitext(script)[1].lower() in PATHEXT
-                        and not win32api.GetFileAttributes(script) & win32file.FILE_ATTRIBUTE_HIDDEN
+                        and not win32api.GetFileAttributes(script)
+                        & win32file.FILE_ATTRIBUTE_HIDDEN
                     )
                     or script.endswith(".py")
-                    or (not sabnzbd.WIN32 and userxbit(script) and not os.path.basename(script).startswith("."))
-                ):
-                    lst.append(os.path.basename(script))
+                    or (
+                        not sabnzbd.WIN32
+                        and userxbit(script)
+                        and not os.path.basename(script).startswith(".")
+                    )
+                )
+            ):
+                lst.append(os.path.basename(script))
             # Make sure capitalization is ignored to avoid strange results
             lst = sorted(lst, key=str.casefold)
         if none:
@@ -612,14 +598,18 @@ def make_script_path(script: str) -> Optional[str]:
     """Return full script path, if any valid script exists, else None"""
     script_path = None
     script_dir = sabnzbd.cfg.script_dir.get_path()
-    if script_dir and script:
-        if script.lower() not in ("none", "default") and is_valid_script(script):
-            script_path = os.path.join(script_dir, script)
-            if not os.path.exists(script_path):
-                script_path = None
-            else:
-                # Paths to scripts should not be long-path notation
-                script_path = clip_path(script_path)
+    if (
+        script_dir
+        and script
+        and script.lower() not in ("none", "default")
+        and is_valid_script(script)
+    ):
+        script_path = os.path.join(script_dir, script)
+        if not os.path.exists(script_path):
+            script_path = None
+        else:
+            # Paths to scripts should not be long-path notation
+            script_path = clip_path(script_path)
     return script_path
 
 
@@ -647,33 +637,34 @@ def set_chmod(path: str, permissions: int, report: bool):
 
 def set_permissions(path: str, recursive: bool = True):
     """Give folder tree and its files their proper permissions"""
-    if not sabnzbd.WIN32:
-        umask = sabnzbd.cfg.umask()
-        try:
-            # Make sure that user R+W+X is on
-            umask = int(umask, 8) | int("0700", 8)
-            report = True
-        except ValueError:
-            # No or no valid permissions
-            # Use the effective permissions of the session
-            # Don't report errors (because the system might not support it)
-            umask = int("0777", 8) & (sabnzbd.ORG_UMASK ^ int("0777", 8))
-            report = False
+    if sabnzbd.WIN32:
+        return
+    umask = sabnzbd.cfg.umask()
+    try:
+        # Make sure that user R+W+X is on
+        umask = int(umask, 8) | int("0700", 8)
+        report = True
+    except ValueError:
+        # No or no valid permissions
+        # Use the effective permissions of the session
+        # Don't report errors (because the system might not support it)
+        umask = int("0777", 8) & (sabnzbd.ORG_UMASK ^ int("0777", 8))
+        report = False
 
-        # Remove executable and special permissions for files
-        umask_file = umask & int("0666", 8)
+    # Remove executable and special permissions for files
+    umask_file = umask & int("0666", 8)
 
-        if os.path.isdir(path):
-            if recursive:
-                # Parse the dir/file tree and set permissions
-                for root, _dirs, files in os.walk(path):
-                    set_chmod(root, umask, report)
-                    for name in files:
-                        set_chmod(os.path.join(root, name), umask_file, report)
-            else:
-                set_chmod(path, umask, report)
+    if os.path.isdir(path):
+        if recursive:
+            # Parse the dir/file tree and set permissions
+            for root, _dirs, files in os.walk(path):
+                set_chmod(root, umask, report)
+                for name in files:
+                    set_chmod(os.path.join(root, name), umask_file, report)
         else:
-            set_chmod(path, umask_file, report)
+            set_chmod(path, umask, report)
+    else:
+        set_chmod(path, umask_file, report)
 
 
 def userxbit(filename: str) -> bool:
@@ -685,9 +676,7 @@ def userxbit(filename: str) -> bool:
     # 876 543 210      # we want bit 6 from the right, counting from 0
     userxbit = 1 << 6  # bit 6
     rwxbits = os.stat(filename)[0]  # the first element of os.stat() is "mode"
-    # do logical AND, check if it is not 0:
-    xbitset = (rwxbits & userxbit) > 0
-    return xbitset
+    return (rwxbits & userxbit) > 0
 
 
 def clip_path(path: str) -> str:
@@ -760,17 +749,13 @@ def get_unique_path(dirpath: str, n: int = 0, create_dir: bool = True) -> str:
     if not check_mount(dirpath):
         return dirpath
 
-    path = dirpath
-    if n:
-        path = "%s.%s" % (dirpath, n)
-
-    if not os.path.exists(path):
-        if create_dir:
-            return create_all_dirs(path, apply_umask=True)
-        else:
-            return path
-    else:
+    path = "%s.%s" % (dirpath, n) if n else dirpath
+    if os.path.exists(path):
         return get_unique_path(dirpath, n=n + 1, create_dir=create_dir)
+    if create_dir:
+        return create_all_dirs(path, apply_umask=True)
+    else:
+        return path
 
 
 @synchronized(DIR_LOCK)
@@ -891,12 +876,9 @@ def get_filepath(path: str, nzo, filename: str):
     filepath, ext = os.path.splitext(filepath)
     n = 0
     while True:
-        if n:
-            fullpath = "%s.%d%s" % (filepath, n, ext)
-        else:
-            fullpath = filepath + ext
+        fullpath = "%s.%d%s" % (filepath, n, ext) if n else filepath + ext
         if os.path.exists(fullpath):
-            n = n + 1
+            n += 1
         else:
             break
 
@@ -948,7 +930,7 @@ def renamer(old: str, new: str, create_local_directories: bool = False) -> str:
                     # Error 17 - Rename can't move to different disk
                     # Jump to moving with shutil.move
                     retries -= 3
-                elif err.winerror == 32 or err.winerror == 5:
+                elif err.winerror in [32, 5]:
                     # Error 32 - Used by another process
                     # Error 5 - Access is denied (virus scanners)
                     logging.debug("File busy, retrying rename %s to %s", old, new)
@@ -980,12 +962,10 @@ def remove_dir(path: str):
                 os.rmdir(path)
                 return
             except OSError as err:
-                # In use by another process
-                if err.winerror == 32:
-                    logging.debug("Retry delete %s", path)
-                    retries -= 1
-                else:
+                if err.winerror != 32:
                     raise
+                logging.debug("Retry delete %s", path)
+                retries -= 1
             time.sleep(3)
         raise OSError("Failed to remove")
     else:
@@ -995,33 +975,34 @@ def remove_dir(path: str):
 @synchronized(DIR_LOCK)
 def remove_all(path: str, pattern: str = "*", keep_folder: bool = False, recursive: bool = False):
     """Remove folder and all its content (optionally recursive)"""
-    if path and os.path.exists(path):
-        # Fast-remove the whole tree if recursive
-        if pattern == "*" and not keep_folder and recursive:
-            logging.debug("Removing dir recursively %s", path)
+    if not path or not os.path.exists(path):
+        return
+    # Fast-remove the whole tree if recursive
+    if pattern == "*" and not keep_folder and recursive:
+        logging.debug("Removing dir recursively %s", path)
+        try:
+            shutil.rmtree(path)
+        except:
+            logging.info("Cannot remove folder %s", path, exc_info=True)
+    else:
+        # Get files based on pattern
+        files = globber_full(path, pattern)
+        if pattern == "*" and not sabnzbd.WIN32:
+            files.extend(globber_full(path, ".*"))
+
+        for f in files:
+            if os.path.isfile(f):
+                try:
+                    remove_file(f)
+                except:
+                    logging.info("Cannot remove file %s", f, exc_info=True)
+            elif recursive:
+                remove_all(f, pattern, False, True)
+        if not keep_folder:
             try:
-                shutil.rmtree(path)
+                remove_dir(path)
             except:
                 logging.info("Cannot remove folder %s", path, exc_info=True)
-        else:
-            # Get files based on pattern
-            files = globber_full(path, pattern)
-            if pattern == "*" and not sabnzbd.WIN32:
-                files.extend(globber_full(path, ".*"))
-
-            for f in files:
-                if os.path.isfile(f):
-                    try:
-                        remove_file(f)
-                    except:
-                        logging.info("Cannot remove file %s", f, exc_info=True)
-                elif recursive:
-                    remove_all(f, pattern, False, True)
-            if not keep_folder:
-                try:
-                    remove_dir(path)
-                except:
-                    logging.info("Cannot remove folder %s", path, exc_info=True)
 
 
 ##############################################################################
@@ -1038,6 +1019,7 @@ def disk_free_macos_clib_statfs64(directory: str) -> Tuple[int, int]:
 
     # format & parameters: on MacOS, see "man statfs", lines starting at
     # "struct statfs { /* when _DARWIN_FEATURE_64_BIT_INODE is defined */"
+
     class statfs64(ctypes.Structure):
         _fields_ = [
             ("f_bsize", ctypes.c_uint32),
@@ -1065,10 +1047,9 @@ def disk_free_macos_clib_statfs64(directory: str) -> Tuple[int, int]:
     if result == 0:
         # result = 0: "Upon successful completion, a value of 0 is returned."
         return fs_info64.f_blocks * fs_info64.f_bsize, fs_info64.f_bavail * fs_info64.f_bsize
-    else:
-        # result = -1: "Otherwise, -1 is returned and the global variable errno is set to indicate the error."
-        logging.debug("Call to MACOSLIBC.statfs64 not successful. Value of errno is %s", ctypes.get_errno())
-        return 0, 0
+    # result = -1: "Otherwise, -1 is returned and the global variable errno is set to indicate the error."
+    logging.debug("Call to MACOSLIBC.statfs64 not successful. Value of errno is %s", ctypes.get_errno())
+    return 0, 0
 
 
 def diskspace_base(dir_to_check: str) -> Tuple[float, float]:

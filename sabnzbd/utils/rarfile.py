@@ -716,9 +716,8 @@ class RarFile(object):
     def setpassword(self, password):
         """Sets the password to use when extracting."""
         self._password = password
-        if self._file_parser:
-            if self._file_parser.has_header_encryption():
-                self._file_parser = None
+        if self._file_parser and self._file_parser.has_header_encryption():
+            self._file_parser = None
         if not self._file_parser:
             self._parse()
         else:
@@ -832,10 +831,7 @@ class RarFile(object):
             pwd
                 optional password to use
         """
-        if isinstance(member, RarInfo):
-            fname = member.filename
-        else:
-            fname = member
+        fname = member.filename if isinstance(member, RarInfo) else member
         self._extract([fname], path, pwd)
 
     def extractall(self, path=None, members=None, pwd=None):
@@ -979,9 +975,8 @@ class CommonParser(object):
         """Returns True if headers are encrypted"""
         if self._hdrenc_main:
             return True
-        if self._main:
-            if self._main.flags & RAR_MAIN_PASSWORD:
-                return True
+        if self._main and self._main.flags & RAR_MAIN_PASSWORD:
+            return True
         return False
 
     def setpassword(self, psw):
@@ -1046,10 +1041,7 @@ class CommonParser(object):
         volfile = self._rarfile
         self._vol_list = [self._rarfile]
         while 1:
-            if endarc:
-                h = None  # don't read past ENDARC
-            else:
-                h = self._parse_header(fd)
+            h = None if endarc else self._parse_header(fd)
             if not h:
                 if more_vols and not self._single_file_check:
                     volume += 1
@@ -1075,11 +1067,12 @@ class CommonParser(object):
 
             if h.type == RAR_BLOCK_MAIN and not self._main:
                 self._main = h
-                if h.flags & RAR_MAIN_NEWNUMBERING:
-                    # RAR 2.x does not set FIRSTVOLUME,
-                    # so check it only if NEWNUMBERING is used
-                    if not self._single_file_check and (h.flags & RAR_MAIN_FIRSTVOLUME) == 0:
-                        raise NeedFirstVolume("Need to start from first volume")
+                if (
+                    h.flags & RAR_MAIN_NEWNUMBERING
+                    and not self._single_file_check
+                    and (h.flags & RAR_MAIN_FIRSTVOLUME) == 0
+                ):
+                    raise NeedFirstVolume("Need to start from first volume")
                 if h.flags & RAR_MAIN_PASSWORD:
                     self._needs_password = True
                     if not self._password:
@@ -1154,12 +1147,13 @@ class CommonParser(object):
     def open(self, inf, psw):
         """Return stream object for file data."""
 
-        if inf.file_redir:
-            # cannot leave to unrar as it expects copied file to exist
-            if inf.file_redir[0] in (RAR5_XREDIR_FILE_COPY, RAR5_XREDIR_HARD_LINK):
-                inf = self.getinfo(inf.file_redir[2])
-                if not inf:
-                    raise BadRarFile("cannot find copied file")
+        if inf.file_redir and inf.file_redir[0] in (
+            RAR5_XREDIR_FILE_COPY,
+            RAR5_XREDIR_HARD_LINK,
+        ):
+            inf = self.getinfo(inf.file_redir[2])
+            if not inf:
+                raise BadRarFile("cannot find copied file")
 
         if inf.flags & RAR_FILE_SPLIT_BEFORE:
             raise NeedFirstVolume("Partial file, please start from first volume: " + inf.filename)
@@ -1204,10 +1198,7 @@ class CommonParser(object):
         try:
             tmpf.write(prefix)
             while size > 0:
-                if size > BSIZE:
-                    buf = rf.read(BSIZE)
-                else:
-                    buf = rf.read(size)
+                buf = rf.read(BSIZE) if size > BSIZE else rf.read(size)
                 if not buf:
                     raise BadRarFile("read failed: " + inf.filename)
                 tmpf.write(buf)
@@ -1270,9 +1261,9 @@ class Rar3Info(RarInfo):
 
     def _must_disable_hack(self):
         if self.type == RAR_BLOCK_FILE:
-            if self.flags & RAR_FILE_PASSWORD:
-                return True
-            elif self.flags & (RAR_FILE_SPLIT_BEFORE | RAR_FILE_SPLIT_AFTER):
+            if self.flags & RAR_FILE_PASSWORD or self.flags & (
+                RAR_FILE_SPLIT_BEFORE | RAR_FILE_SPLIT_AFTER
+            ):
                 return True
         elif self.type == RAR_BLOCK_MAIN:
             if self.flags & (RAR_MAIN_SOLID | RAR_MAIN_PASSWORD):
@@ -1338,7 +1329,7 @@ class RAR3Parser(CommonParser):
                 pos += 1
             crc_pos = pos
             if h.flags & RAR_MAIN_COMMENT:
-                self._parse_subblocks(h, hdata, pos)
+                self._parse_subblocks(h, hdata, crc_pos)
         elif h.type == RAR_BLOCK_FILE:
             pos = self._parse_file_header(h, hdata, pos - 4)
             crc_pos = pos
@@ -1452,11 +1443,12 @@ class RAR3Parser(CommonParser):
                 pos += S_COMMENT_HDR.size
                 data = hdata[pos:pos_next]
                 cmt = rar3_decompress(ver, meth, data, declen, sflags, crc, self._password)
-                if not self._crc_check:
+                if (
+                    not self._crc_check
+                    or self._crc_check
+                    and rar_crc32(cmt) & 0xFFFF == crc
+                ):
                     h.comment = self._decode_comment(cmt)
-                elif rar_crc32(cmt) & 0xFFFF == crc:
-                    h.comment = self._decode_comment(cmt)
-
             pos = pos_next
         return pos
 
@@ -1494,15 +1486,15 @@ class RAR3Parser(CommonParser):
     def process_entry(self, fd, item):
         if item.type == RAR_BLOCK_FILE:
             # use only first part
-            if (item.flags & RAR_FILE_SPLIT_BEFORE) == 0:
+            if (
+                item.flags & RAR_FILE_SPLIT_BEFORE != 0
+                and self._single_file_check
+                and item.filename not in self._info_map
+                or (item.flags & RAR_FILE_SPLIT_BEFORE) == 0
+            ):
                 self._info_map[item.filename] = item
                 self._info_list.append(item)
-            elif self._single_file_check:
-                # Broken rar-files would lead to double file-listings
-                if item.filename not in self._info_map:
-                    self._info_map[item.filename] = item
-                    self._info_list.append(item)
-            elif len(self._info_list) > 0:
+            elif not self._single_file_check and len(self._info_list) > 0:
                 # final crc is in last block
                 old = self._info_list[-1]
                 old.CRC = item.CRC
@@ -1611,9 +1603,7 @@ class Rar5MainInfo(Rar5Info):
     main_volume_number = None
 
     def _must_disable_hack(self):
-        if self.main_flags & RAR5_MAIN_FLAG_SOLID:
-            return True
-        return False
+        return bool(self.main_flags & RAR5_MAIN_FLAG_SOLID)
 
 
 class Rar5EncryptionInfo(Rar5Info):
@@ -1777,10 +1767,7 @@ class RAR5Parser(CommonParser):
         h.filename = h.orig_filename.decode("utf8", "replace")
 
         # use compatible values
-        if h.file_host_os == RAR5_OS_WINDOWS:
-            h.host_os = RAR_OS_WIN32
-        else:
-            h.host_os = RAR_OS_UNIX
+        h.host_os = RAR_OS_WIN32 if h.file_host_os == RAR5_OS_WINDOWS else RAR_OS_UNIX
         h.compress_type = RAR_M0 + ((h.file_compress_flags >> 7) & 7)
 
         if h.block_extra_size:
@@ -1834,10 +1821,6 @@ class RAR5Parser(CommonParser):
             self._parse_file_redir(h, xdata, pos)
         elif xtype == RAR5_XFILE_OWNER:
             self._parse_file_owner(h, xdata, pos)
-        elif xtype == RAR5_XFILE_SERVICE:
-            pass
-        else:
-            pass
 
     # extra block for file time record
     def _parse_file_xtime(self, h, xdata, pos):
@@ -1908,15 +1891,15 @@ class RAR5Parser(CommonParser):
     def process_entry(self, fd, item):
         if item.block_type == RAR5_BLOCK_FILE:
             # use only first part
-            if (item.block_flags & RAR5_BLOCK_FLAG_SPLIT_BEFORE) == 0:
+            if (
+                item.block_flags & RAR5_BLOCK_FLAG_SPLIT_BEFORE != 0
+                and self._single_file_check
+                and item.filename not in self._info_map
+                or (item.block_flags & RAR5_BLOCK_FLAG_SPLIT_BEFORE) == 0
+            ):
                 self._info_map[item.filename] = item
                 self._info_list.append(item)
-            elif self._single_file_check:
-                # Broken rar-files would lead to double file-listings
-                if item.filename not in self._info_map:
-                    self._info_map[item.filename] = item
-                    self._info_list.append(item)
-            elif len(self._info_list) > 0:
+            elif not self._single_file_check and len(self._info_list) > 0:
                 # final crc is in last block
                 old = self._info_list[-1]
                 old.CRC = item.CRC
@@ -2068,9 +2051,7 @@ class RarExtFile(RawIOBase):
         """Read all or specified amount of data from archive entry."""
 
         # sanitize cnt
-        if cnt is None or cnt < 0:
-            cnt = self._remain
-        elif cnt > self._remain:
+        if cnt is None or cnt < 0 or cnt > self._remain:
             cnt = self._remain
         if cnt == 0:
             return EMPTY
@@ -2173,10 +2154,7 @@ class RarExtFile(RawIOBase):
     def _skip(self, cnt):
         """Read and discard data"""
         while cnt > 0:
-            if cnt > 8192:
-                buf = self.read(8192)
-            else:
-                buf = self.read(cnt)
+            buf = self.read(8192) if cnt > 8192 else self.read(cnt)
             if not buf:
                 break
             cnt -= len(buf)
@@ -2276,8 +2254,7 @@ class PipeReader(RarExtFile):
     def readinto(self, buf):
         """Zero-copy read directly into buffer."""
         cnt = len(buf)
-        if cnt > self._remain:
-            cnt = self._remain
+        cnt = min(cnt, self._remain)
         vbuf = memoryview(buf)
         res = got = 0
         while got < cnt:
@@ -2311,9 +2288,8 @@ class DirectReader(RarExtFile):
 
         while cnt > 0:
             # next vol needed?
-            if self._cur_avail == 0:
-                if not self._open_next():
-                    break
+            if self._cur_avail == 0 and not self._open_next():
+                break
 
             # fd is in read pos, do the read
             if cnt > self._cur_avail:
@@ -2332,9 +2308,8 @@ class DirectReader(RarExtFile):
         buf = []
         while cnt > 0:
             # next vol needed?
-            if self._cur_avail == 0:
-                if not self._open_next():
-                    break
+            if self._cur_avail == 0 and not self._open_next():
+                break
 
             # fd is in read pos, do the read
             if cnt > self._cur_avail:
@@ -2393,9 +2368,8 @@ class DirectReader(RarExtFile):
         vbuf = memoryview(buf)
         while got < len(buf):
             # next vol needed?
-            if self._cur_avail == 0:
-                if not self._open_next():
-                    break
+            if self._cur_avail == 0 and not self._open_next():
+                break
 
             # length for next read
             cnt = len(buf) - got
@@ -2762,7 +2736,7 @@ def _parse_xtime(flag, data, pos, basetime=None):
 
 def is_filelike(obj):
     """Filename or file object?"""
-    if isinstance(obj, str) or isinstance(obj, str):
+    if isinstance(obj, str):
         return False
     res = True
     for a in ("read", "tell", "seek"):
@@ -2857,20 +2831,14 @@ def to_datetime(t):
 
     # sanitize invalid values
     mday = (0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
-    if mon < 1:
-        mon = 1
-    if mon > 12:
-        mon = 12
-    if day < 1:
-        day = 1
+    mon = max(mon, 1)
+    mon = min(mon, 12)
+    day = max(day, 1)
     if day > mday[mon]:
         day = mday[mon]
-    if h > 23:
-        h = 23
-    if m > 59:
-        m = 59
-    if s > 59:
-        s = 59
+    h = min(h, 23)
+    m = min(m, 59)
+    s = min(s, 59)
     if mon == 2 and day == 29:
         try:
             return datetime(year, mon, day, h, m, s)
@@ -2892,11 +2860,7 @@ def parse_dos_time(stamp):
 
 def custom_popen(cmd):
     """Disconnect cmd from parent fds, read only from stdout."""
-    # needed for py2exe
-    creationflags = 0
-    if sys.platform == "win32":
-        creationflags = 0x08000000  # CREATE_NO_WINDOW
-
+    creationflags = 0x08000000 if sys.platform == "win32" else 0
     # run command
     try:
         p = Popen(cmd, bufsize=0, stdout=PIPE, stdin=PIPE, stderr=STDOUT, creationflags=creationflags)

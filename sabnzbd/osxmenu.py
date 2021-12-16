@@ -246,7 +246,6 @@ class SABnzbdDelegate(NSObject):
     def queueUpdate(self):
         try:
             qnfo = sabnzbd.NzbQueue.queue_info(start=0, limit=10)
-            bytesleftprogess = 0
             self.info = ""
             self.menu_queue = NSMenu.alloc().init()
 
@@ -257,6 +256,7 @@ class SABnzbdDelegate(NSObject):
                 self.menu_queue.addItem_(menu_queue_item)
                 self.menu_queue.addItem_(NSMenuItem.separatorItem())
 
+                bytesleftprogess = 0
                 for pnfo in qnfo.list:
                     bytesleft = pnfo.bytes_left / MEBI
                     bytesleftprogess += pnfo.bytes_left
@@ -510,9 +510,12 @@ class SABnzbdDelegate(NSObject):
         # logging.info('[osx] file : %s' % (filenames))
         for filename in filenames:
             logging.info("[osx] receiving from macOS : %s", filename)
-            if os.path.exists(filename):
-                if sabnzbd.filesystem.get_ext(filename) in VALID_ARCHIVES + VALID_NZB_FILES:
-                    sabnzbd.add_nzbfile(filename, keep=True)
+            if (
+                os.path.exists(filename)
+                and sabnzbd.filesystem.get_ext(filename)
+                in VALID_ARCHIVES + VALID_NZB_FILES
+            ):
+                sabnzbd.add_nzbfile(filename, keep=True)
         # logging.info('opening done')
 
     def applicationShouldTerminate_(self, sender):
